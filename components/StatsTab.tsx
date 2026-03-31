@@ -389,7 +389,7 @@ export default function StatsTab({ items }: StatsTabProps) {
               <Tooltip
                 cursor={{ fill: 'rgba(255,255,255,0.03)' }}
                 contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 12, fontSize: 12 }}
-                formatter={(v: number) => [v, 'Ventes']}
+                formatter={(v) => [v, 'Ventes']}
               />
               <Bar dataKey="count" radius={[6, 6, 0, 0]}>
                 {shoesSizes.map((_, i) => (
@@ -417,7 +417,7 @@ export default function StatsTab({ items }: StatsTabProps) {
               <Tooltip
                 cursor={{ fill: 'rgba(255,255,255,0.03)' }}
                 contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 12, fontSize: 12 }}
-                formatter={(v: number) => [v, 'Ventes']}
+                formatter={(v) => [v, 'Ventes']}
               />
               <Bar dataKey="count" radius={[6, 6, 0, 0]}>
                 {clothingSizes.map((_, i) => (
