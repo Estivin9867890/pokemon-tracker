@@ -80,7 +80,7 @@ export default function TresorerieTab({ stats }: TresorerieTabProps) {
                       fontSize: '12px',
                       color: '#fafafa',
                     }}
-                    formatter={(value: number) => [formatCurrency(value), '']}
+                    formatter={(value) => [formatCurrency(value as number), '']}
                   />
                 </PieChart>
               </ResponsiveContainer>
