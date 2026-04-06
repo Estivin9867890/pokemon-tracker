@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MONACO — Flipping Vinted",
-  description: "Gestionnaire de stock et ROI pour associés Vinted",
+  title: "POKEMON — Flipping Vinted",
+  description: "Gestionnaire de stock et ROI Pokémon",
 };
 
 export default function RootLayout({
