@@ -4,8 +4,6 @@ import { useState, useEffect } from 'react'
 import Modal from '@/components/ui/Modal'
 import Input from '@/components/ui/Input'
 import { AppSettings } from '@/types'
-import { saveSettings } from '@/lib/settings'
-import { Loader2 } from 'lucide-react'
 
 interface SettingsModalProps {
   open: boolean
@@ -16,8 +14,6 @@ interface SettingsModalProps {
 
 export default function SettingsModal({ open, onClose, settings, onSave }: SettingsModalProps) {
   const [form, setForm] = useState(settings)
-  const [saving, setSaving] = useState(false)
-
   useEffect(() => { if (open) setForm(settings) }, [open, settings])
 
   const set = (k: keyof AppSettings) => (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -30,16 +26,10 @@ export default function SettingsModal({ open, onClose, settings, onSave }: Setti
       setForm((p) => ({ ...p, [k]: parseFloat(e.target.value) || 0 }))
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setSaving(true)
-    try {
-      await saveSettings(form)
-      onSave(form)
-      onClose()
-    } finally {
-      setSaving(false)
-    }
+    onSave(form)
+    onClose()
   }
 
   return (
@@ -112,10 +102,9 @@ export default function SettingsModal({ open, onClose, settings, onSave }: Setti
           </button>
           <button
             type="submit"
-            disabled={saving}
-            className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold text-sm flex items-center justify-center gap-2 transition-colors"
+            className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm transition-colors"
           >
-            {saving ? <Loader2 size={13} className="animate-spin" /> : 'Enregistrer'}
+            Enregistrer
           </button>
         </div>
       </form>

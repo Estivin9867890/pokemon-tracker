@@ -1,10 +1,9 @@
-import { InventoryItem, ItemWithCalc, DashboardStats } from '@/types'
+import { Consumable, InventoryItem, ItemWithCalc, DashboardStats } from '@/types'
 
 export const INITIAL_CAPITAL = 200
 export const ROI_TARGET = 30
 
 export function calcItem(item: InventoryItem): ItemWithCalc {
-  // boost_cost inclus dans le coût total
   const cost_basis = item.purchase_price + item.vinted_fees + item.boost_cost
 
   let margin_net: number | null = null
@@ -21,23 +20,46 @@ export function calcItem(item: InventoryItem): ItemWithCalc {
   return { ...item, cost_basis, margin_net, roi_percent }
 }
 
-export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPITAL): DashboardStats {
-  const sold = items.filter((i) => i.status === 'Vendu')
-  const stock = items.filter((i) => i.status === 'En Attente' || i.status === 'En Stock' || i.status === 'Sur Vinted')
+export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPITAL, consumables: Consumable[] = []): DashboardStats {
+  // Exclure les hits et les anciens enfants de lots
+  const realItems = items.filter((i) => !i.is_hit && !(i.lot_id !== null && !i.is_lot))
 
-  const stockValue = stock.reduce((s, i) => s + i.purchase_price + i.vinted_fees, 0)
-  const totalSpent = items.reduce((s, i) => s + i.purchase_price + i.vinted_fees, 0)
+  const sold  = realItems.filter((i) => i.status === 'Vendu')
+  const stock = realItems.filter((i) => i.status === 'En Attente' || i.status === 'En Stock' || i.status === 'Sur Vinted' || i.status === 'Partiellement vendu')
+
+  const stockValue   = stock.reduce((s, i) => s + i.purchase_price + i.vinted_fees, 0)
+  const totalSpent   = realItems.reduce((s, i) => s + i.purchase_price + i.vinted_fees, 0)
   const totalReceived = sold.reduce((s, i) => s + (i.actual_sale_price ?? 0) - i.sale_fees, 0)
-  const cashInHand = initialCapital - totalSpent + totalReceived
+  const cashInHand   = initialCapital - totalSpent + totalReceived
   const currentCapital = cashInHand + stockValue
 
-  // Bénéfice net = inclut boost_cost
+  // Consommables
+  const consumablesTotal = consumables.reduce((s, c) => s + c.price * (c.quantity ?? 1), 0)
+  const consumablesByMonth: Record<string, number> = {}
+  consumables.forEach((c) => {
+    const key = c.date.slice(0, 7)
+    consumablesByMonth[key] = (consumablesByMonth[key] ?? 0) + c.price * (c.quantity ?? 1)
+  })
+  const monthValues = Object.values(consumablesByMonth)
+  const avgMonthlyConsumables = monthValues.length > 0
+    ? monthValues.reduce((a, b) => a + b, 0) / monthValues.length
+    : 0
+
+  // Financement perso
+  const romainContribution = realItems
+    .filter((i) => i.funded_by === 'ROMAIN_PERSO')
+    .reduce((s, i) => s + i.purchase_price, 0)
+  const celianContribution = realItems
+    .filter((i) => i.funded_by === 'CELIAN_PERSO')
+    .reduce((s, i) => s + i.purchase_price, 0)
+
+  // Bénéfice net
   const netProfit = sold.reduce((s, i) => {
     const cost = i.purchase_price + i.vinted_fees + i.boost_cost
     return s + (i.actual_sale_price ?? 0) - i.sale_fees - cost
-  }, 0)
+  }, 0) - consumablesTotal
 
-  // ROI moyen incluant boost_cost
+  // ROI moyen
   const roiValues = sold
     .map((i) => {
       const cost = i.purchase_price + i.vinted_fees + i.boost_cost
@@ -50,12 +72,13 @@ export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPIT
     ? roiValues.reduce((a, b) => a + b, 0) / roiValues.length
     : 0
 
-  const pendingValue = stock.reduce((s, i) => {
+  // Valeur estimée stock + hits
+  const stockHits = items.filter((i) => i.is_hit && (i.status === 'En Attente' || i.status === 'En Stock' || i.status === 'Sur Vinted' || i.status === 'Partiellement vendu'))
+  const pendingValue = [...stock, ...stockHits].reduce((s, i) => {
     if (i.expected_sale_price) return s + i.expected_sale_price
     return s
   }, 0)
 
-  // Délai moyen : posted_at → sold_at (fallback sur created_at)
   const delays = sold
     .filter((i) => i.sold_at)
     .map((i) => {
@@ -64,17 +87,19 @@ export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPIT
     })
   const avgSellDelay = delays.length > 0 ? delays.reduce((a, b) => a + b, 0) / delays.length : null
 
-  const stockValueLouis = stock
-    .filter((i) => i.location === 'Chez Louis')
-    .reduce((s, i) => s + i.purchase_price + i.vinted_fees, 0)
   const stockValueCelian = stock
     .filter((i) => i.location === 'Chez Célian')
+    .reduce((s, i) => s + i.purchase_price + i.vinted_fees, 0)
+  const stockValueRomain = stock
+    .filter((i) => i.location === 'Chez Romain')
     .reduce((s, i) => s + i.purchase_price + i.vinted_fees, 0)
 
   return {
     currentCapital, cashInHand, stockValue, netProfit, avgROI,
     stockCount: stock.length, soldCount: sold.length, pendingValue,
-    avgSellDelay, stockValueLouis, stockValueCelian,
+    avgSellDelay, stockValueCelian, stockValueRomain,
+    romainContribution, celianContribution,
+    consumablesTotal, avgMonthlyConsumables,
   }
 }
 

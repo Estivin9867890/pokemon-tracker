@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, BarChart, Bar, Cell,
+  ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie,
 } from 'recharts'
 import { InventoryItem } from '@/types'
 import { formatCurrency } from '@/lib/calculations'
@@ -69,9 +69,6 @@ function buildChartData(sold: InventoryItem[], period: Period) {
     const key = groupByMonth
       ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
       : d.toISOString().split('T')[0]
-    const label = groupByMonth
-      ? d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
-      : d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
 
     if (!map[key]) map[key] = { key, ca: 0, profit: 0, count: 0 }
     const cost = item.purchase_price + item.vinted_fees + item.boost_cost
@@ -83,7 +80,7 @@ function buildChartData(sold: InventoryItem[], period: Period) {
   return Object.entries(map)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([, v]) => ({
-      date:   v.key.length === 7
+      date: v.key.length === 7
         ? new Date(v.key + '-01').toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
         : new Date(v.key).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }),
       ca:     parseFloat(v.ca.toFixed(2)),
@@ -92,35 +89,37 @@ function buildChartData(sold: InventoryItem[], period: Period) {
     }))
 }
 
-function buildTop5(sold: InventoryItem[]) {
+function buildTop5Extensions(sold: InventoryItem[]) {
   const map: Record<string, { count: number; ca: number; profit: number }> = {}
   sold.forEach((item) => {
-    const raw = item.brand || item.item_name.split(/[\s\-–—]/)[0].trim()
-    const brand = raw.trim().toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
-    if (!map[brand]) map[brand] = { count: 0, ca: 0, profit: 0 }
+    const ext = item.extension?.trim() || 'Inconnue'
+    if (!map[ext]) map[ext] = { count: 0, ca: 0, profit: 0 }
     const cost = item.purchase_price + item.vinted_fees + item.boost_cost
-    map[brand].count  += 1
-    map[brand].ca     += item.actual_sale_price ?? 0
-    map[brand].profit += (item.actual_sale_price ?? 0) - item.sale_fees - cost
+    map[ext].count  += 1
+    map[ext].ca     += item.actual_sale_price ?? 0
+    map[ext].profit += (item.actual_sale_price ?? 0) - item.sale_fees - cost
   })
   return Object.entries(map)
-    .map(([brand, d]) => ({ brand, ...d, avgProfit: d.count > 0 ? d.profit / d.count : 0 }))
+    .map(([ext, d]) => ({ ext, ...d, avgProfit: d.count > 0 ? d.profit / d.count : 0 }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 5)
 }
 
-function buildSizeData(sold: InventoryItem[], category: 'Chaussure' | 'Vêtement') {
-  const map: Record<string, number> = {}
-  sold
-    .filter((i) => i.category === category && i.size)
-    .forEach((i) => {
-      const s = i.size!.trim()
-      map[s] = (map[s] ?? 0) + 1
-    })
-  return Object.entries(map)
-    .map(([size, count]) => ({ size, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 8)
+function buildTypeData(sold: InventoryItem[]) {
+  let cartes = 0
+  let scelles = 0
+  let profitCartes = 0
+  let profitScelles = 0
+  sold.forEach((item) => {
+    const cost = item.purchase_price + item.vinted_fees + item.boost_cost
+    const profit = (item.actual_sale_price ?? 0) - item.sale_fees - cost
+    if (item.pokemon_category === 'SEALED') { scelles++; profitScelles += profit }
+    else { cartes++; profitCartes += profit }
+  })
+  return [
+    { name: 'Cartes', count: cartes, profit: profitCartes, color: '#38bdf8' },
+    { name: 'Scellé', count: scelles, profit: profitScelles, color: '#a78bfa' },
+  ].filter(d => d.count > 0)
 }
 
 function Evolution({ value }: { value: number | null }) {
@@ -159,7 +158,6 @@ function KpiCard({ icon: Icon, label, value, sub, accent, valueColor = 'text-whi
   )
 }
 
-// Tooltip custom pour le graphique
 function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: { value: number; name: string }[]; label?: string }) {
   if (!active || !payload?.length) return null
   return (
@@ -180,16 +178,10 @@ export default function StatsTab({ items }: StatsTabProps) {
   const currentStart = useMemo(() => periodStart(period), [period])
   const prevStart    = useMemo(() => prevPeriodStart(period), [period])
 
-  const currentSold = useMemo(
-    () => filterSold(items, currentStart),
-    [items, currentStart]
-  )
-  const prevSold = useMemo(
-    () => filterSold(items, prevStart, currentStart ?? undefined),
-    [items, prevStart, currentStart]
-  )
+  const currentSold = useMemo(() => filterSold(items, currentStart), [items, currentStart])
+  const prevSold    = useMemo(() => filterSold(items, prevStart, currentStart ?? undefined), [items, prevStart, currentStart])
 
-  // ── KPIs ──────────────────────────────────────────────
+  // ── KPIs ──
   const ca      = currentSold.reduce((s, i) => s + (i.actual_sale_price ?? 0), 0)
   const prevCa  = prevSold.reduce((s, i) => s + (i.actual_sale_price ?? 0), 0)
   const caEvol  = prevCa > 0 ? ((ca - prevCa) / prevCa) * 100 : null
@@ -201,11 +193,11 @@ export default function StatsTab({ items }: StatsTabProps) {
 
   const boostBudget = currentSold.reduce((s, i) => s + i.boost_cost, 0)
 
-  const prevNet     = prevSold.reduce((s, i) => {
+  const prevNet    = prevSold.reduce((s, i) => {
     const cost = i.purchase_price + i.vinted_fees + i.boost_cost
     return s + (i.actual_sale_price ?? 0) - i.sale_fees - cost
   }, 0)
-  const profitEvol  = prevNet !== 0 ? ((netProfit - prevNet) / Math.abs(prevNet)) * 100 : null
+  const profitEvol = prevNet !== 0 ? ((netProfit - prevNet) / Math.abs(prevNet)) * 100 : null
 
   const delays = currentSold
     .filter((i) => i.sold_at)
@@ -217,11 +209,10 @@ export default function StatsTab({ items }: StatsTabProps) {
 
   const stockListed = items.filter((i) => i.status !== 'Vendu').length
 
-  // ── Chart & Brands ────────────────────────────────────
-  const chartData     = useMemo(() => buildChartData(currentSold, period), [currentSold, period])
-  const top5          = useMemo(() => buildTop5(currentSold), [currentSold])
-  const shoesSizes    = useMemo(() => buildSizeData(currentSold, 'Chaussure'), [currentSold])
-  const clothingSizes = useMemo(() => buildSizeData(currentSold, 'Vêtement'), [currentSold])
+  // ── Chart & Data ──
+  const chartData    = useMemo(() => buildChartData(currentSold, period), [currentSold, period])
+  const top5         = useMemo(() => buildTop5Extensions(currentSold), [currentSold])
+  const typeData     = useMemo(() => buildTypeData(currentSold), [currentSold])
 
   return (
     <div className="space-y-6">
@@ -264,7 +255,7 @@ export default function StatsTab({ items }: StatsTabProps) {
           icon={BarChart2}
           label="Ventes"
           value={String(currentSold.length)}
-          sub={<span className="text-[11px] text-zinc-600">{period === 'all' ? 'All Time' : `Sur la période`}</span>}
+          sub={<span className="text-[11px] text-zinc-600">{period === 'all' ? 'All Time' : 'Sur la période'}</span>}
           accent="bg-violet-400/10 border-violet-400/20 text-violet-400"
           valueColor="text-violet-400"
         />
@@ -279,7 +270,7 @@ export default function StatsTab({ items }: StatsTabProps) {
         <KpiCard
           icon={Minus}
           label="Stock actif"
-          value={`${stockListed} articles`}
+          value={`${stockListed} produits`}
           sub={<span className="text-[11px] text-zinc-600">En Stock + Sur Vinted</span>}
           accent="bg-zinc-600/20 border-zinc-600/30 text-zinc-400"
         />
@@ -287,13 +278,13 @@ export default function StatsTab({ items }: StatsTabProps) {
           icon={Zap}
           label="Budget Boost"
           value={formatCurrency(boostBudget)}
-          sub={<span className="text-[11px] text-zinc-600">{currentSold.filter(i => i.boost_cost > 0).length} article{currentSold.filter(i => i.boost_cost > 0).length > 1 ? 's' : ''} boosté{currentSold.filter(i => i.boost_cost > 0).length > 1 ? 's' : ''}</span>}
+          sub={<span className="text-[11px] text-zinc-600">{currentSold.filter(i => i.boost_cost > 0).length} produit{currentSold.filter(i => i.boost_cost > 0).length > 1 ? 's' : ''} boosté{currentSold.filter(i => i.boost_cost > 0).length > 1 ? 's' : ''}</span>}
           accent="bg-amber-400/10 border-amber-400/20 text-amber-400"
           valueColor={boostBudget > 0 ? 'text-amber-400' : 'text-zinc-500'}
         />
       </div>
 
-      {/* ── Graphique ── */}
+      {/* ── Graphique Évolution CA ── */}
       <div className="bg-[#111113] border border-zinc-800/80 rounded-2xl p-5">
         <div className="flex items-center justify-between mb-5">
           <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Évolution du CA</p>
@@ -302,11 +293,8 @@ export default function StatsTab({ items }: StatsTabProps) {
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-400" />Bénéfice</span>
           </div>
         </div>
-
         {chartData.length === 0 ? (
-          <div className="flex items-center justify-center h-48 text-zinc-600 text-sm">
-            Aucune vente sur cette période
-          </div>
+          <div className="flex items-center justify-center h-48 text-zinc-600 text-sm">Aucune vente sur cette période</div>
         ) : (
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
@@ -331,11 +319,83 @@ export default function StatsTab({ items }: StatsTabProps) {
         )}
       </div>
 
-      {/* ── Top 5 Marques ── */}
+      {/* ── Cartes vs Scellé ── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Donut */}
+        <div className="bg-[#111113] border border-zinc-800/80 rounded-2xl p-5">
+          <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-4">
+            🃏 Répartition par type
+          </p>
+          {typeData.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Aucune donnée</div>
+          ) : (
+            <div className="flex items-center gap-6">
+              <div className="relative">
+                <ResponsiveContainer width={140} height={140}>
+                  <PieChart>
+                    <Pie data={typeData} cx="50%" cy="50%" innerRadius="50%" outerRadius="80%" dataKey="count" strokeWidth={0} paddingAngle={3}>
+                      {typeData.map((entry, i) => (
+                        <Cell key={i} fill={entry.color} opacity={0.9} />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <p className="text-xs font-bold text-white">{currentSold.length}</p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-3">
+                {typeData.map((d) => (
+                  <div key={d.name} className="flex items-start gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full mt-0.5 shrink-0" style={{ background: d.color }} />
+                    <div>
+                      <p className="text-xs font-semibold text-white">{d.name}</p>
+                      <p className="text-[11px] text-zinc-500">{d.count} vente{d.count > 1 ? 's' : ''}</p>
+                      <p className={`text-[11px] font-medium ${d.profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {formatCurrency(d.profit, true)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Bar chart ventes par type */}
+        <div className="bg-[#111113] border border-zinc-800/80 rounded-2xl p-5">
+          <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-4">
+            📦 Volume de ventes
+          </p>
+          {typeData.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Aucune donnée</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={140}>
+              <BarChart data={typeData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                <XAxis dataKey="name" tick={{ fill: '#71717a', fontSize: 11 }} tickLine={false} axisLine={false} />
+                <YAxis tick={{ fill: '#71717a', fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <Tooltip
+                  cursor={{ fill: 'rgba(255,255,255,0.03)' }}
+                  contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 12, fontSize: 12 }}
+                  formatter={(v) => [v, 'Ventes']}
+                />
+                <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                  {typeData.map((entry, i) => (
+                    <Cell key={i} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
+      {/* ── Top 5 Extensions ── */}
       <div className="bg-[#111113] border border-zinc-800/80 rounded-2xl overflow-hidden">
         <div className="px-5 py-4 border-b border-zinc-800/60 flex items-center gap-2">
           <Award size={13} className="text-amber-400" />
-          <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Top 5 marques vendues</p>
+          <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Top 5 extensions les plus rentables</p>
         </div>
         {top5.length === 0 ? (
           <div className="flex items-center justify-center py-10 text-zinc-600 text-sm">Aucune donnée</div>
@@ -344,7 +404,7 @@ export default function StatsTab({ items }: StatsTabProps) {
             <thead>
               <tr className="border-b border-zinc-800/40">
                 <th className="text-left px-5 py-2.5 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">Rang</th>
-                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">Marque</th>
+                <th className="text-left px-4 py-2.5 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">Extension</th>
                 <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">Ventes</th>
                 <th className="text-right px-4 py-2.5 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">CA total</th>
                 <th className="text-right px-5 py-2.5 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">Marge moy.</th>
@@ -352,13 +412,13 @@ export default function StatsTab({ items }: StatsTabProps) {
             </thead>
             <tbody className="divide-y divide-zinc-800/30">
               {top5.map((row, i) => (
-                <tr key={row.brand} className="hover:bg-zinc-800/20 transition-colors">
+                <tr key={row.ext} className="hover:bg-zinc-800/20 transition-colors">
                   <td className="px-5 py-3">
                     <span className={`text-xs font-bold ${i === 0 ? 'text-amber-400' : i === 1 ? 'text-zinc-400' : i === 2 ? 'text-amber-700' : 'text-zinc-600'}`}>
                       #{i + 1}
                     </span>
                   </td>
-                  <td className="px-4 py-3 font-semibold text-white">{row.brand}</td>
+                  <td className="px-4 py-3 font-semibold text-white">{row.ext}</td>
                   <td className="px-4 py-3 text-right text-zinc-300">{row.count}</td>
                   <td className="px-4 py-3 text-right text-zinc-300">{formatCurrency(row.ca)}</td>
                   <td className="px-5 py-3 text-right">
@@ -370,62 +430,6 @@ export default function StatsTab({ items }: StatsTabProps) {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
-
-      {/* ── Tailles Chaussures ── */}
-      <div className="bg-[#111113] border border-zinc-800/80 rounded-2xl p-5">
-        <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-5">
-          👟 Top Tailles Chaussures
-        </p>
-        {shoesSizes.length === 0 ? (
-          <div className="flex items-center justify-center h-32 text-zinc-600 text-sm">Aucune donnée</div>
-        ) : (
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={shoesSizes} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-              <XAxis dataKey="size" tick={{ fill: '#71717a', fontSize: 11 }} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fill: '#71717a', fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-              <Tooltip
-                cursor={{ fill: 'rgba(255,255,255,0.03)' }}
-                contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 12, fontSize: 12 }}
-                formatter={(v) => [v, 'Ventes']}
-              />
-              <Bar dataKey="count" radius={[6, 6, 0, 0]}>
-                {shoesSizes.map((_, i) => (
-                  <Cell key={i} fill={i === 0 ? '#38bdf8' : i === 1 ? '#0ea5e9' : '#0284c7'} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-
-      {/* ── Tailles Vêtements ── */}
-      <div className="bg-[#111113] border border-zinc-800/80 rounded-2xl p-5">
-        <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-5">
-          👕 Distribution Tailles Vêtements
-        </p>
-        {clothingSizes.length === 0 ? (
-          <div className="flex items-center justify-center h-32 text-zinc-600 text-sm">Aucune donnée</div>
-        ) : (
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={clothingSizes} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-              <XAxis dataKey="size" tick={{ fill: '#71717a', fontSize: 11 }} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fill: '#71717a', fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
-              <Tooltip
-                cursor={{ fill: 'rgba(255,255,255,0.03)' }}
-                contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 12, fontSize: 12 }}
-                formatter={(v) => [v, 'Ventes']}
-              />
-              <Bar dataKey="count" radius={[6, 6, 0, 0]}>
-                {clothingSizes.map((_, i) => (
-                  <Cell key={i} fill={i === 0 ? '#a78bfa' : i === 1 ? '#8b5cf6' : '#7c3aed'} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
         )}
       </div>
     </div>

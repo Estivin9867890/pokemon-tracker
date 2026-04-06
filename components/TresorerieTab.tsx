@@ -9,9 +9,9 @@ interface TresorerieTabProps {
 }
 
 const SLICES = [
-  { key: 'stockValueLouis', label: 'Stock Louis', color: '#60a5fa' },
   { key: 'stockValueCelian', label: 'Stock Célian', color: '#a78bfa' },
-  { key: 'cashInHand', label: 'Cash disponible', color: '#34d399' },
+  { key: 'stockValueRomain', label: 'Stock Romain', color: '#60a5fa' },
+  { key: 'cashInHand',       label: 'Cash disponible', color: '#34d399' },
 ] as const
 
 export default function TresorerieTab({ stats }: TresorerieTabProps) {

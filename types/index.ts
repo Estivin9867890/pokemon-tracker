@@ -1,12 +1,49 @@
-export type Location = 'Chez Louis' | 'Chez Célian'
-export type Status = 'En Attente' | 'En Stock' | 'Sur Vinted' | 'Vendu'
-export type Category = 'Chaussure' | 'Vêtement'
+export type Location = 'Chez Célian' | 'Chez Romain'
+export type Status = 'En Attente' | 'En Stock' | 'Sur Vinted' | 'Vendu' | 'Partiellement vendu'
+export type FundedBy = 'CASH' | 'CELIAN_PERSO' | 'ROMAIN_PERSO'
+export type ConsumableCategory = 'PACKAGING' | 'SHIPPING' | 'OTHER'
+
+export interface Consumable {
+  id: string
+  created_at: string
+  name: string
+  price: number
+  quantity: number
+  date: string
+  category: ConsumableCategory
+}
+
+export const POKEMON_RARITIES: { label: string; symbol: string }[] = [
+  { label: 'Commune',                     symbol: '●'   },
+  { label: 'Peu commune',                 symbol: '◆'   },
+  { label: 'Rare',                        symbol: '★'   },
+  { label: 'Rare Holo',                   symbol: '★H'  },
+  { label: 'Reverse Holo',               symbol: '★R'  },
+  { label: 'Holo',                        symbol: '◈'   },
+  { label: 'Cosmos Holo',                symbol: '✦'   },
+  { label: 'Holo Parallèle',             symbol: '⬡'   },
+  { label: 'EX / GX / V',               symbol: 'UR'  },
+  { label: 'VMAX / VSTAR',              symbol: 'VM'  },
+  { label: 'Full Art',                   symbol: 'FA'  },
+  { label: 'Rainbow Rare',               symbol: '🌈'  },
+  { label: 'Gold / Secret Rare',         symbol: 'GS'  },
+  { label: 'AR (Art Rare)',              symbol: 'AR'  },
+  { label: 'SAR (Special Art Rare)',     symbol: 'SAR' },
+  { label: 'Illustration Rare',          symbol: 'IR'  },
+  { label: 'Special Illustration Rare', symbol: 'SIR' },
+  { label: 'Promo',                      symbol: 'P'   },
+  { label: 'Trainer Gallery',            symbol: 'TG'  },
+  { label: 'Shiny',                      symbol: '✨'  },
+  { label: 'Amazing Rare',               symbol: 'AR+' },
+  { label: 'Secret Rare (>set)',         symbol: 'SR'  },
+]
+
+export const GRADING_COMPANIES = ['PSA', 'BGS', 'CGC', 'PCA', 'ACE'] as const
 
 export interface InventoryItem {
   id: string
   created_at: string
   item_name: string
-  brand: string
   purchase_price: number
   vinted_fees: number
   expected_sale_price: number | null
@@ -18,8 +55,28 @@ export interface InventoryItem {
   posted_at: string | null
   sold_at: string | null
   notes: string | null
-  category: Category | null
-  size: string | null
+  // Pokémon-specific
+  pokemon_name: string | null
+  card_number: string | null
+  extension: string | null
+  rarity: string | null
+  pokemon_category: 'SINGLE' | 'SEALED' | null
+  poke_location: 'CELIAN' | 'ROMAIN' | null
+  is_graded: boolean
+  grading_company: string | null
+  grading_note: number | null
+  // Lots
+  lot_id: string | null
+  is_lot: boolean
+  lot_total_cost: number | null
+  item_count: number | null
+  items_sold: number | null
+  revenue_generated: number | null
+  // Financement perso
+  funded_by: FundedBy | null
+  // Hits dans un lot
+  is_hit: boolean
+  parent_lot_id: string | null
 }
 
 export interface ItemWithCalc extends InventoryItem {
@@ -37,21 +94,29 @@ export interface DashboardStats {
   stockCount: number
   soldCount: number
   pendingValue: number
-  avgSellDelay: number | null // jours
-  stockValueLouis: number
+  avgSellDelay: number | null
   stockValueCelian: number
+  stockValueRomain: number
+  // Financement perso
+  romainContribution: number
+  celianContribution: number
+  // Consommables
+  consumablesTotal: number
+  avgMonthlyConsumables: number
 }
 
 export interface AppSettings {
-  initial_capital: number       // Capital de départ
-  roi_target: number            // ROI minimum cible en %
-  obj1_label: string            // Label objectif 1
-  obj1_target: number           // Montant objectif 1
+  initial_capital: number
+  roi_target: number
+  obj1_label: string
+  obj1_target: number
   obj2_label: string
   obj2_target: number
   obj3_label: string
   obj3_target: number
-  default_vinted_fees: number   // Frais Vinted pré-remplis à l'ajout
+  default_vinted_fees: number
+  romain_owed_pokemon: number
+  celian_owed_pokemon: number
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -64,17 +129,33 @@ export const DEFAULT_SETTINGS: AppSettings = {
   obj3_label: '1 an',
   obj3_target: 4500,
   default_vinted_fees: 0,
+  romain_owed_pokemon: 0,
+  celian_owed_pokemon: 0,
 }
 
-// Form state pour ajout / édition
 export interface ItemFormData {
   item_name: string
-  brand: string
   purchase_price: string
   vinted_fees: string
   expected_sale_price: string
   location: Location
   notes: string
-  category: Category | null
-  size: string
+  // Pokémon
+  pokemon_name: string
+  card_number: string
+  extension: string
+  rarity: string
+  pokemon_category: 'SINGLE' | 'SEALED'
+  poke_location: 'CELIAN' | 'ROMAIN'
+  is_graded: boolean
+  grading_company: string
+  grading_note: string
+  // Lots
+  is_lot: boolean
+  lot_total_cost: string
+  nb_articles: string
+  // Financement
+  funded_by: FundedBy | null
+  // Hits
+  hits: Array<{ pokemon_name: string; card_number: string; estimated_value: string }>
 }
