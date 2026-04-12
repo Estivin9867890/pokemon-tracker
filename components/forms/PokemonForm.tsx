@@ -15,17 +15,18 @@ interface PokemonFormProps {
   isEdit: boolean
   raritySearch: string
   setRaritySearch: Dispatch<SetStateAction<string>>
+  onHitDeleted?: (hitId: string) => void
 }
 
 export default function PokemonForm({
   form, setForm, errors, roiTarget, isEdit,
-  raritySearch, setRaritySearch,
+  raritySearch, setRaritySearch, onHitDeleted,
 }: PokemonFormProps) {
   const [calcOpen, setCalcOpen]       = useState(false)
   const [hitsEnabled, setHitsEnabled] = useState(false)
 
   function setNbHits(n: number) {
-    const clamped = Math.max(0, Math.min(10, n))
+    const clamped = Math.max(0, n)
     setForm((p) => {
       const hits = [...(p.hits ?? [])]
       while (hits.length < clamped) hits.push({ pokemon_name: '', card_number: '', estimated_value: '' })
@@ -43,6 +44,8 @@ export default function PokemonForm({
 
   function removeHit(i: number) {
     setForm((p) => {
+      const hit = (p.hits ?? [])[i]
+      if (hit?.id) onHitDeleted?.(hit.id)
       const hits = (p.hits ?? []).filter((_, idx) => idx !== i)
       return { ...p, hits }
     })
@@ -213,7 +216,6 @@ export default function PokemonForm({
                     <input
                       type="number"
                       min="1"
-                      max="10"
                       placeholder="1"
                       value={form.hits?.length || ''}
                       onChange={(e) => setNbHits(parseInt(e.target.value) || 0)}
@@ -228,7 +230,7 @@ export default function PokemonForm({
                     </button>
                   </div>
 
-                  <div className="flex flex-col gap-1.5 max-h-[300px] overflow-y-auto pr-0.5">
+                  <div className="flex flex-col gap-1.5 max-h-96 overflow-y-auto pr-0.5">
                   {(form.hits ?? []).map((hit, i) => (
                     <div key={i} className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-2.5 space-y-1.5">
                       <div className="flex items-center justify-between">
@@ -288,6 +290,120 @@ export default function PokemonForm({
             </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── ÉDITION LOT ─────────────────────────────────── */}
+      {isEdit && form.is_lot && (
+        <div className="space-y-3 border border-violet-500/20 rounded-2xl p-4 bg-violet-500/[0.03]">
+          <p className="text-[11px] font-semibold text-violet-400 uppercase tracking-widest">Paramètres du lot</p>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-zinc-400">Coût total</label>
+              <div className="relative">
+                <input
+                  type="number" step="0.01" min="0" placeholder="120.00"
+                  value={form.lot_total_cost}
+                  onChange={(e) => setForm((p) => ({ ...p, lot_total_cost: e.target.value }))}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 pr-9 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:border-violet-500/50 focus:ring-violet-500/10 transition-colors"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-500">€</span>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-zinc-400">Nb d&apos;articles</label>
+              <input
+                type="number" min="1" placeholder="10"
+                value={form.nb_articles}
+                onChange={(e) => setForm((p) => ({ ...p, nb_articles: e.target.value }))}
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:border-violet-500/50 focus:ring-violet-500/10 transition-colors"
+              />
+            </div>
+          </div>
+
+          {form.lot_total_cost && form.nb_articles && (
+            <p className="text-[11px] text-zinc-500">
+              {(parseFloat(form.lot_total_cost) / (parseInt(form.nb_articles) || 1)).toFixed(2)}€ / carte
+            </p>
+          )}
+
+          {/* Hits du lot */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold text-amber-400 uppercase tracking-widest flex items-center gap-1">
+                <Sparkles size={10} />
+                Hits ({(form.hits ?? []).length})
+              </p>
+              <button
+                type="button"
+                onClick={() => setForm((p) => ({
+                  ...p,
+                  hits: [...(p.hits ?? []), { pokemon_name: '', card_number: '', estimated_value: '' }]
+                }))}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-semibold hover:bg-amber-500/20 transition-colors"
+              >
+                <Plus size={10} />
+                Ajouter un hit
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-1.5 max-h-96 overflow-y-auto pr-0.5">
+              {(form.hits ?? []).length === 0 && (
+                <p className="text-[11px] text-zinc-600 text-center py-3">Aucun hit enregistré</p>
+              )}
+              {(form.hits ?? []).map((hit, i) => (
+                <div key={hit.id ?? i} className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 tracking-wider">
+                      <Sparkles size={7} />
+                      {hit.id ? 'HIT existant' : 'NOUVEAU HIT'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeHit(i)}
+                      className="w-5 h-5 flex items-center justify-center rounded text-zinc-600 hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <input
+                      placeholder="Nom du Pokémon"
+                      value={hit.pokemon_name}
+                      onChange={(e) => updateHit(i, 'pokemon_name', e.target.value)}
+                      className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-400/40 transition-colors"
+                    />
+                    <div className="relative">
+                      <input
+                        type="number" step="0.01" min="0" placeholder="Prix estimé"
+                        value={hit.estimated_value}
+                        onChange={(e) => updateHit(i, 'estimated_value', e.target.value)}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 pr-5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-400/40 transition-colors"
+                      />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500">€</span>
+                    </div>
+                    <input
+                      placeholder="N° carte (optionnel)"
+                      value={hit.card_number}
+                      onChange={(e) => updateHit(i, 'card_number', e.target.value)}
+                      className="col-span-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-400/40 transition-colors"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {(form.hits ?? []).length > 0 && form.lot_total_cost && (
+              <p className="text-[10px] text-zinc-500 text-center">
+                Valeur estimée hits :{' '}
+                <span className="text-amber-400 font-semibold">
+                  {formatCurrency((form.hits ?? []).reduce((s, h) => s + (parseFloat(h.estimated_value) || 0), 0))}
+                </span>
+                {' '}/ coût lot {formatCurrency(parseFloat(form.lot_total_cost) || 0)}
+              </p>
+            )}
+          </div>
         </div>
       )}
 
@@ -380,7 +496,7 @@ export default function PokemonForm({
             <button
               key={loc}
               type="button"
-              onClick={() => setForm((p) => ({ ...p, poke_location: loc }))}
+              onClick={() => setForm((p) => ({ ...p, poke_location: loc, location: loc === 'ROMAIN' ? 'Chez Romain' : 'Chez Célian' }))}
               className={`flex-1 rounded-xl py-2 text-xs font-semibold border transition-all ${
                 form.poke_location === loc
                   ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-400'

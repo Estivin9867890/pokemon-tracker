@@ -9,29 +9,34 @@ export function calcItem(item: InventoryItem): ItemWithCalc {
   let margin_net: number | null = null
   let roi_percent: number | null = null
 
-  if (item.actual_sale_price !== null) {
-    margin_net = item.actual_sale_price - item.sale_fees - cost_basis
-    roi_percent = cost_basis > 0 ? parseFloat(((margin_net / cost_basis) * 100).toFixed(1)) : null
+  // Pour les lots, utiliser revenue_generated comme prix de vente réel
+  const saleRevenue = item.is_lot && item.revenue_generated != null
+    ? item.revenue_generated
+    : item.actual_sale_price
+
+  if (saleRevenue !== null) {
+    margin_net = saleRevenue - item.sale_fees - cost_basis
+    // ROI = (Vente - (Achat + Frais + Boost)) / Achat
+    roi_percent = item.purchase_price > 0 ? parseFloat(((margin_net / item.purchase_price) * 100).toFixed(1)) : null
   } else if (item.expected_sale_price !== null) {
     margin_net = item.expected_sale_price - cost_basis
-    roi_percent = cost_basis > 0 ? parseFloat(((margin_net / cost_basis) * 100).toFixed(1)) : null
+    roi_percent = item.purchase_price > 0 ? parseFloat(((margin_net / item.purchase_price) * 100).toFixed(1)) : null
   }
 
   return { ...item, cost_basis, margin_net, roi_percent }
 }
 
-export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPITAL, consumables: Consumable[] = []): DashboardStats {
-  // Exclure les hits et les anciens enfants de lots
+export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPITAL, consumables: Consumable[] = [], owedRomain = 0, owedCelian = 0): DashboardStats {
   const realItems = items.filter((i) => !i.is_hit && !(i.lot_id !== null && !i.is_lot))
 
-  const sold  = realItems.filter((i) => i.status === 'Vendu')
-  const stock = realItems.filter((i) => i.status === 'En Attente' || i.status === 'En Stock' || i.status === 'Sur Vinted' || i.status === 'Partiellement vendu')
+  const sold     = realItems.filter((i) => i.status === 'Vendu')
+  const soldHits = items.filter((i) => i.is_hit && i.status === 'Vendu')
+  const stock    = realItems.filter((i) => i.status === 'En Attente' || i.status === 'En Stock' || i.status === 'Sur Vinted' || i.status === 'Partiellement vendu')
 
-  const stockValue   = stock.reduce((s, i) => s + i.purchase_price + i.vinted_fees, 0)
-  const totalSpent   = realItems.reduce((s, i) => s + i.purchase_price + i.vinted_fees, 0)
-  const totalReceived = sold.reduce((s, i) => s + (i.actual_sale_price ?? 0) - i.sale_fees, 0)
-  const cashInHand   = initialCapital - totalSpent + totalReceived
-  const currentCapital = cashInHand + stockValue
+  // Valeur stock = somme des prix d'achat des articles non vendus
+  const stockValue = stock.reduce((s, i) => s + i.purchase_price, 0)
+
+  const hitsReceived = soldHits.reduce((s, i) => s + (i.actual_sale_price ?? 0) - i.sale_fees, 0)
 
   // Consommables
   const consumablesTotal = consumables.reduce((s, c) => s + c.price * (c.quantity ?? 1), 0)
@@ -45,6 +50,18 @@ export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPIT
     ? monthValues.reduce((a, b) => a + b, 0) / monthValues.length
     : 0
 
+  // Bénéfice net : boost déduit du bénéfice (pas du CA)
+  // Pour les lots, revenue_generated = somme cumulée des ventes réelles
+  const netProfit = sold.reduce((s, i) => {
+    const cost    = i.purchase_price + i.vinted_fees + i.boost_cost
+    const revenue = i.is_lot ? (i.revenue_generated ?? 0) : (i.actual_sale_price ?? 0)
+    return s + revenue - i.sale_fees - cost
+  }, 0) + hitsReceived
+
+  // Trésorerie = Capital initial + Bénéfices réalisés - Valeur stock actuel - consommables - dettes
+  const cashInHand     = initialCapital + netProfit - stockValue - consumablesTotal - owedRomain - owedCelian
+  const currentCapital = cashInHand + stockValue
+
   // Financement perso
   const romainContribution = realItems
     .filter((i) => i.funded_by === 'ROMAIN_PERSO')
@@ -53,18 +70,14 @@ export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPIT
     .filter((i) => i.funded_by === 'CELIAN_PERSO')
     .reduce((s, i) => s + i.purchase_price, 0)
 
-  // Bénéfice net
-  const netProfit = sold.reduce((s, i) => {
-    const cost = i.purchase_price + i.vinted_fees + i.boost_cost
-    return s + (i.actual_sale_price ?? 0) - i.sale_fees - cost
-  }, 0) - consumablesTotal
-
-  // ROI moyen
+  // ROI moyen — dénominateur = purchase_price (formule : (Vente - (Achat+Frais+Boost)) / Achat)
   const roiValues = sold
     .map((i) => {
-      const cost = i.purchase_price + i.vinted_fees + i.boost_cost
-      if (cost === 0 || i.actual_sale_price === null) return null
-      return ((i.actual_sale_price - i.sale_fees - cost) / cost) * 100
+      if (i.purchase_price === 0) return null
+      const cost    = i.purchase_price + i.vinted_fees + i.boost_cost
+      const revenue = i.is_lot ? (i.revenue_generated ?? 0) : (i.actual_sale_price ?? 0)
+      if (!revenue) return null
+      return ((revenue - i.sale_fees - cost) / i.purchase_price) * 100
     })
     .filter((v): v is number => v !== null)
 
@@ -89,14 +102,14 @@ export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPIT
 
   const stockValueCelian = stock
     .filter((i) => i.location === 'Chez Célian')
-    .reduce((s, i) => s + i.purchase_price + i.vinted_fees, 0)
+    .reduce((s, i) => s + i.purchase_price, 0)
   const stockValueRomain = stock
     .filter((i) => i.location === 'Chez Romain')
-    .reduce((s, i) => s + i.purchase_price + i.vinted_fees, 0)
+    .reduce((s, i) => s + i.purchase_price, 0)
 
   return {
     currentCapital, cashInHand, stockValue, netProfit, avgROI,
-    stockCount: stock.length, soldCount: sold.length, pendingValue,
+    stockCount: stock.length, soldCount: sold.length + soldHits.length, pendingValue,
     avgSellDelay, stockValueCelian, stockValueRomain,
     romainContribution, celianContribution,
     consumablesTotal, avgMonthlyConsumables,
