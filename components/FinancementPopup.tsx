@@ -128,7 +128,10 @@ export default function FinancementPopup({ open, onClose, stats, settings, onSav
         <div className="h-px bg-zinc-800/60" />
 
         <div className="flex items-center justify-between px-1">
-          <p className="text-xs text-zinc-500">Trésorerie commune</p>
+          <div>
+            <p className="text-xs text-zinc-500">Trésorerie nette</p>
+            <p className="text-[10px] text-zinc-700">après dettes + logistique</p>
+          </div>
           <p className={`text-sm font-bold ${stats.cashInHand < 0 ? 'text-red-500' : 'text-emerald-400'}`}>
             {stats.cashInHand < 0 ? '-' : ''}{formatCurrency(Math.abs(stats.cashInHand))}
           </p>

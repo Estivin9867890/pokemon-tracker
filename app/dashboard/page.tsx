@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { Consumable, InventoryItem, ItemFormData, AppSettings, DEFAULT_SETTINGS } from '@/types'
 import { calcStats } from '@/lib/calculations'
-import { listItems, addItem, addLot, editItem, markSold, markReceived, removeItem, toggleVinted, listConsumables, addConsumable, editConsumable, removeConsumable, sellLotPartial } from '@/lib/db'
+import { listItems, addItem, addLot, editItem, editLot, markSold, markReceived, markHitSold, patchSalePrice, removeItem, toggleVinted, listConsumables, addConsumable, editConsumable, removeConsumable, sellLotPartial } from '@/lib/db'
 import { getSettings, saveSettings } from '@/lib/settings'
 import StatsBar from '@/components/StatsBar'
 import LotTracker from '@/components/LotTracker'
@@ -43,8 +43,8 @@ export default function DashboardPage() {
   const [detailItem, setDetailItem]       = useState<InventoryItem | null>(null)
 
   const stats = useMemo(
-    () => calcStats(items, settings.initial_capital, consumables),
-    [items, settings.initial_capital, consumables]
+    () => calcStats(items, settings.initial_capital, consumables, settings.romain_owed_pokemon, settings.celian_owed_pokemon),
+    [items, settings.initial_capital, consumables, settings.romain_owed_pokemon, settings.celian_owed_pokemon]
   )
 
   useEffect(() => {
@@ -64,7 +64,17 @@ export default function DashboardPage() {
 
   // --- Handlers ---
   async function handleSave(data: ItemFormData, id?: string) {
-    if (id) {
+    if (id && data.is_lot) {
+      const { updated, deletedIds } = await editLot(id, data)
+      setItems((prev) => {
+        const withoutDeleted = prev.filter((i) => !deletedIds.includes(i.id))
+        const updatedIds = new Set(updated.map((u) => u.id))
+        return [
+          ...withoutDeleted.map((i) => updatedIds.has(i.id) ? updated.find((u) => u.id === i.id)! : i),
+          ...updated.filter((u) => !withoutDeleted.some((p) => p.id === u.id)),
+        ]
+      })
+    } else if (id) {
       const updated = await editItem(id, data)
       setItems((prev) => prev.map((i) => (i.id === id ? updated : i)))
     } else if (data.is_lot) {
@@ -85,14 +95,28 @@ export default function DashboardPage() {
     setActiveTab('archives')
   }
 
-  async function handleLotSell(itemsSoldDelta: number, revenueDelta: number) {
+  async function handleLotSell(itemsSoldDelta: number, revenueDelta: number, hitSales?: { id: string; soldPrice: number }[]) {
     if (!lotSellItem) return
     const newSold    = (lotSellItem.items_sold ?? 0) + itemsSoldDelta
     const newRevenue = (lotSellItem.revenue_generated ?? 0) + revenueDelta
     const itemCount  = lotSellItem.item_count ?? 1
-    const updated    = await sellLotPartial(lotSellItem.id, newSold, newRevenue, itemCount)
+
+    if (hitSales && hitSales.length > 0) {
+      const updatedHits = await Promise.all(hitSales.map((hs) => markHitSold(hs.id, hs.soldPrice)))
+      setItems((prev) => prev.map((i) => {
+        const hit = updatedHits.find((h) => h.id === i.id)
+        return hit ?? i
+      }))
+    }
+
+    const updated = await sellLotPartial(lotSellItem.id, newSold, newRevenue, itemCount)
     setItems((prev) => prev.map((i) => (i.id === lotSellItem.id ? updated : i)))
     if (newSold >= itemCount) setActiveTab('archives')
+  }
+
+  async function handlePatchSalePrice(item: InventoryItem, price: number) {
+    const updated = await patchSalePrice(item.id, price)
+    setItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)))
   }
 
   async function handleMarkReceived(item: InventoryItem) {
@@ -199,7 +223,7 @@ export default function DashboardPage() {
             <StatsBar stats={stats} settings={settings} items={items} onSaveSettings={setSettings} />
 
             {/* Suivi des Lots */}
-            <LotTracker items={items} />
+            <LotTracker items={items} onMarkReceived={handleMarkReceived} />
 
             <div className="flex items-center gap-2 -mt-2">
               <div className="h-px flex-1 bg-zinc-800/60" />
@@ -238,9 +262,10 @@ export default function DashboardPage() {
                   onEdit={openEdit}
                   onDelete={(item) => setDeleteItem(item)}
                   onDetail={(item) => setDetailItem(item)}
+                  onPatchSalePrice={handlePatchSalePrice}
                 />
               )}
-              {activeTab === 'stats'      && <StatsTab items={items} />}
+              {activeTab === 'stats'      && <StatsTab items={items} consumablesTotal={stats.consumablesTotal} />}
               {activeTab === 'objectifs'  && <ObjectifsTab stats={stats} settings={settings} />}
               {activeTab === 'tresorerie' && <TresorerieTab stats={stats} />}
               {activeTab === 'logistique' && (
@@ -268,6 +293,7 @@ export default function DashboardPage() {
         onClose={closeAddEdit}
         onSave={handleSave}
         item={editItemState}
+        existingHits={editItemState?.is_lot ? items.filter((i) => i.is_hit && i.parent_lot_id === editItemState.lot_id) : []}
         roiTarget={settings.roi_target}
         defaultVintedFees={settings.default_vinted_fees}
       />
@@ -282,6 +308,7 @@ export default function DashboardPage() {
         open={!!lotSellItem}
         onClose={() => setLotSellItem(null)}
         item={lotSellItem}
+        hits={lotSellItem ? items.filter((i) => i.is_hit && i.parent_lot_id === lotSellItem.lot_id && !i.is_sold) : []}
         onConfirm={handleLotSell}
       />
       <DeleteModal

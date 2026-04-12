@@ -10,6 +10,7 @@ interface AddEditModalProps {
   onClose: () => void
   onSave: (data: ItemFormData, id?: string) => Promise<void>
   item?: InventoryItem | null
+  existingHits?: InventoryItem[]
   roiTarget: number
   defaultVintedFees: number
 }
@@ -39,14 +40,24 @@ function emptyForm(defaultVintedFees: number): ItemFormData {
   }
 }
 
-export default function AddEditModal({ open, onClose, onSave, item, roiTarget, defaultVintedFees }: AddEditModalProps) {
+export default function AddEditModal({ open, onClose, onSave, item, existingHits = [], roiTarget, defaultVintedFees }: AddEditModalProps) {
   const isEdit = !!item
   const [form, setForm]               = useState<ItemFormData>(() => emptyForm(defaultVintedFees))
   const [errors, setErrors]           = useState<Partial<Record<keyof ItemFormData, string>>>({})
   const [raritySearch, setRaritySearch] = useState('')
+  const [deletedHitIds, setDeletedHitIds] = useState<string[]>([])
 
   useEffect(() => {
+    setDeletedHitIds([])
     if (item) {
+      const hits = item.is_lot
+        ? existingHits.map((h) => ({
+            id:              h.id,
+            pokemon_name:    h.pokemon_name ?? h.item_name,
+            card_number:     h.card_number ?? '',
+            estimated_value: h.expected_sale_price != null ? String(h.expected_sale_price) : '',
+          }))
+        : []
       setForm({
         item_name: item.item_name,
         purchase_price: String(item.purchase_price),
@@ -67,7 +78,8 @@ export default function AddEditModal({ open, onClose, onSave, item, roiTarget, d
         lot_total_cost: item.lot_total_cost != null ? String(item.lot_total_cost) : '',
         nb_articles: item.item_count != null ? String(item.item_count) : '',
         funded_by: item.funded_by ?? null,
-        hits: [],
+        lot_id: item.lot_id ?? undefined,
+        hits,
       })
       setRaritySearch(item.rarity ?? '')
     } else {
@@ -75,7 +87,7 @@ export default function AddEditModal({ open, onClose, onSave, item, roiTarget, d
       setRaritySearch('')
     }
     setErrors({})
-  }, [item, open, defaultVintedFees])
+  }, [item, open, defaultVintedFees]) // existingHits intentionnellement omis — stable à l'ouverture
 
   const set = (k: keyof ItemFormData) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
@@ -94,18 +106,26 @@ export default function AddEditModal({ open, onClose, onSave, item, roiTarget, d
     return Object.keys(e).length === 0
   }
 
+  function handleHitDeleted(hitId: string) {
+    setDeletedHitIds((prev) => [...prev, hitId])
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!validate()) return
-    await onSave(form, item?.id)
+    await onSave({ ...form, deletedHitIds }, item?.id)
     onClose()
   }
+
+  const isEditLot = isEdit && !!item?.is_lot
+  const title = isEditLot ? 'Modifier le lot' : isEdit ? 'Modifier la carte' : 'Ajouter une carte'
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={isEdit ? 'Modifier la carte' : 'Ajouter une carte'}
+      title={title}
+      maxWidth={isEditLot ? 'max-w-xl' : 'max-w-lg'}
     >
       <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
         <div className="px-6 py-5 space-y-4 flex-1 overflow-y-auto">
@@ -117,6 +137,7 @@ export default function AddEditModal({ open, onClose, onSave, item, roiTarget, d
             isEdit={isEdit}
             raritySearch={raritySearch}
             setRaritySearch={setRaritySearch}
+            onHitDeleted={handleHitDeleted}
           />
 
           {/* Notes */}

@@ -37,6 +37,9 @@ function rowToItem(row: Row): InventoryItem {
     funded_by:            (row.funded_by as FundedBy)          ?? null,
     is_hit:               (row.is_hit as boolean)              ?? false,
     parent_lot_id:        (row.parent_lot_id as string)        ?? null,
+    received:             (row.received as boolean)            ?? false,
+    is_sold:              (row.is_sold as boolean)             ?? false,
+    sold_price:           (row.sold_price as number)           ?? null,
   }
 }
 
@@ -80,7 +83,7 @@ export async function addItem(data: ItemFormData): Promise<InventoryItem> {
       sale_fees:           0,
       boost_cost:          0,
       location:            data.location,
-      status:              'En Attente',
+      status:              'En Stock',
       notes:               data.notes || null,
       pokemon_name:        data.pokemon_name || null,
       card_number:         data.card_number || null,
@@ -96,6 +99,9 @@ export async function addItem(data: ItemFormData): Promise<InventoryItem> {
       funded_by:           data.funded_by ?? null,
       is_hit:              false,
       parent_lot_id:       null,
+      received:            true,
+      is_sold:             false,
+      sold_price:          null,
     })
     .select()
     .single()
@@ -135,6 +141,9 @@ export async function addLot(data: ItemFormData): Promise<InventoryItem[]> {
       funded_by:           data.funded_by ?? null,
       is_hit:              false,
       parent_lot_id:       null,
+      received:            false,
+      is_sold:             false,
+      sold_price:          null,
     })
     .select()
     .single()
@@ -166,6 +175,9 @@ export async function addLot(data: ItemFormData): Promise<InventoryItem[]> {
         funded_by:           data.funded_by ?? null,
         is_hit:              true,
         parent_lot_id:       lotId,
+        received:            false,
+        is_sold:             false,
+        sold_price:          null,
       })
       .select()
       .single()
@@ -174,6 +186,92 @@ export async function addLot(data: ItemFormData): Promise<InventoryItem[]> {
   }
 
   return results
+}
+
+export async function editLot(id: string, data: ItemFormData): Promise<{ updated: InventoryItem[]; deletedIds: string[] }> {
+  const totalCost  = parseFloat(data.lot_total_cost) || 0
+  const nbArticles = Math.max(1, parseInt(data.nb_articles) || 1)
+  const lotId      = data.lot_id!
+
+  // 1. Mettre à jour le parent
+  const { data: parentRow, error: parentErr } = await supabase
+    .from('inventory')
+    .update({
+      item_name:      data.pokemon_name || data.item_name,
+      purchase_price: totalCost,
+      lot_total_cost: totalCost,
+      item_count:     nbArticles,
+      extension:      data.extension || null,
+      notes:          data.notes || null,
+      location:       data.location,
+      funded_by:      data.funded_by ?? null,
+      expected_sale_price: data.expected_sale_price ? parseFloat(data.expected_sale_price) : null,
+    })
+    .eq('id', id)
+    .select()
+    .single()
+  throwIf(parentErr, 'editLot (parent)')
+  const updated: InventoryItem[] = [rowToItem(parentRow as Row)]
+
+  // 2. Supprimer les hits retirés
+  const deletedIds = data.deletedHitIds ?? []
+  for (const hitId of deletedIds) {
+    const { error } = await supabase.from('inventory').delete().eq('id', hitId)
+    throwIf(error, 'editLot (delete hit)')
+  }
+
+  // 3. Mettre à jour / créer les hits
+  for (const hit of (data.hits ?? [])) {
+    if (!hit.pokemon_name.trim()) continue
+    if (hit.id) {
+      const { data: hitRow, error: hitErr } = await supabase
+        .from('inventory')
+        .update({
+          item_name:           hit.pokemon_name,
+          pokemon_name:        hit.pokemon_name,
+          card_number:         hit.card_number || null,
+          expected_sale_price: hit.estimated_value ? parseFloat(hit.estimated_value) : null,
+        })
+        .eq('id', hit.id)
+        .select()
+        .single()
+      throwIf(hitErr, 'editLot (update hit)')
+      updated.push(rowToItem(hitRow as Row))
+    } else {
+      const { data: hitRow, error: hitErr } = await supabase
+        .from('inventory')
+        .insert({
+          item_name:           hit.pokemon_name,
+          purchase_price:      0,
+          vinted_fees:         0,
+          expected_sale_price: hit.estimated_value ? parseFloat(hit.estimated_value) : null,
+          actual_sale_price:   null,
+          sale_fees:           0,
+          boost_cost:          0,
+          location:            data.location,
+          status:              'En Stock',
+          pokemon_name:        hit.pokemon_name,
+          card_number:         hit.card_number || null,
+          extension:           data.extension || null,
+          pokemon_category:    data.pokemon_category || null,
+          poke_location:       data.poke_location || null,
+          is_graded:           false,
+          is_lot:              false,
+          funded_by:           data.funded_by ?? null,
+          is_hit:              true,
+          parent_lot_id:       lotId,
+          received:            false,
+          is_sold:             false,
+          sold_price:          null,
+        })
+        .select()
+        .single()
+      throwIf(hitErr, 'editLot (create hit)')
+      updated.push(rowToItem(hitRow as Row))
+    }
+  }
+
+  return { updated, deletedIds }
 }
 
 export async function editItem(id: string, data: ItemFormData): Promise<InventoryItem> {
@@ -256,11 +354,33 @@ export async function toggleVinted(id: string, currentStatus: string): Promise<I
 export async function markReceived(id: string): Promise<InventoryItem> {
   const { data: row, error } = await supabase
     .from('inventory')
-    .update({ status: 'En Stock' })
+    .update({ status: 'En Stock', received: true })
     .eq('id', id)
     .select()
     .single()
   throwIf(error, 'markReceived')
+  return rowToItem(row as Row)
+}
+
+export async function markHitSold(hitId: string, soldPrice: number): Promise<InventoryItem> {
+  const { data: row, error } = await supabase
+    .from('inventory')
+    .update({ is_sold: true, sold_price: soldPrice, actual_sale_price: soldPrice, status: 'Vendu', sold_at: new Date().toISOString() })
+    .eq('id', hitId)
+    .select()
+    .single()
+  throwIf(error, 'markHitSold')
+  return rowToItem(row as Row)
+}
+
+export async function patchSalePrice(id: string, actualSalePrice: number): Promise<InventoryItem> {
+  const { data: row, error } = await supabase
+    .from('inventory')
+    .update({ actual_sale_price: actualSalePrice, sold_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single()
+  throwIf(error, 'patchSalePrice')
   return rowToItem(row as Row)
 }
 

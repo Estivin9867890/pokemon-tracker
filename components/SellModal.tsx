@@ -5,12 +5,12 @@ import Modal from '@/components/ui/Modal'
 import Input from '@/components/ui/Input'
 import { InventoryItem } from '@/types'
 import { formatCurrency } from '@/lib/calculations'
-import { CheckCircle2, Zap } from 'lucide-react'
+import { CheckCircle2, Zap, Loader2 } from 'lucide-react'
 
 interface SellModalProps {
   open: boolean
   onClose: () => void
-  onConfirm: (actualPrice: number, saleFees: number, boostCost: number) => void
+  onConfirm: (actualPrice: number, saleFees: number, boostCost: number) => Promise<void>
   item: InventoryItem | null
   roiTarget: number
 }
@@ -20,6 +20,8 @@ export default function SellModal({ open, onClose, onConfirm, item, roiTarget }:
   const [saleFees, setSaleFees] = useState('')
   const [usedBoost, setUsedBoost] = useState(false)
   const [boostCost, setBoostCost] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (open) {
@@ -39,11 +41,19 @@ export default function SellModal({ open, onClose, onConfirm, item, roiTarget }:
   const margin = price > 0 ? price - fees - costBasis : null
   const roi = margin !== null && costBasis > 0 ? (margin / costBasis) * 100 : null
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (price <= 0) return
-    onConfirm(price, fees, boost)
-    onClose()
+    setSaving(true)
+    setError(null)
+    try {
+      await onConfirm(price, fees, boost)
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur lors de la vente')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -139,15 +149,19 @@ export default function SellModal({ open, onClose, onConfirm, item, roiTarget }:
           </div>
         )}
 
+        {error && (
+          <p className="text-[11px] text-red-400 text-center px-1">{error}</p>
+        )}
+
         <div className="flex gap-3 pt-1">
-          <button type="button" onClick={onClose}
-            className="flex-1 py-2.5 rounded-xl border border-zinc-800 text-sm text-zinc-400 hover:text-white hover:border-zinc-700 transition-colors">
+          <button type="button" onClick={onClose} disabled={saving}
+            className="flex-1 py-2.5 rounded-xl border border-zinc-800 text-sm text-zinc-400 hover:text-white hover:border-zinc-700 transition-colors disabled:opacity-40">
             Annuler
           </button>
-          <button type="submit"
-            className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm flex items-center justify-center gap-2 transition-colors">
-            <CheckCircle2 size={14} />
-            Confirmer la vente
+          <button type="submit" disabled={saving || price <= 0}
+            className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+            {saving ? 'Enregistrement…' : 'Confirmer la vente'}
           </button>
         </div>
       </form>

@@ -77,6 +77,10 @@ export interface InventoryItem {
   // Hits dans un lot
   is_hit: boolean
   parent_lot_id: string | null
+  // Réception & vente hit
+  received: boolean
+  is_sold: boolean
+  sold_price: number | null
 }
 
 export interface ItemWithCalc extends InventoryItem {
@@ -157,5 +161,7 @@ export interface ItemFormData {
   // Financement
   funded_by: FundedBy | null
   // Hits
-  hits: Array<{ pokemon_name: string; card_number: string; estimated_value: string }>
+  hits: Array<{ id?: string; pokemon_name: string; card_number: string; estimated_value: string }>
+  deletedHitIds?: string[]
+  lot_id?: string
 }

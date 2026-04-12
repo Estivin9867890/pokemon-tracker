@@ -138,10 +138,10 @@ export default function StatsBar({ stats, settings, items, onSaveSettings }: Sta
         <StatTile
           icon={ShoppingBag}
           label="Budget Consommables"
-          value={formatCurrency(stats.consumablesTotal)}
-          sub={`Moy. mensuelle : ${formatCurrency(stats.avgMonthlyConsumables)}`}
-          valueColor={stats.consumablesTotal > 0 ? 'text-orange-400' : 'text-zinc-500'}
-          accent="bg-orange-400/10 border-orange-400/20 text-orange-400"
+          value={stats.consumablesTotal > 0 ? `-${formatCurrency(stats.consumablesTotal)}` : formatCurrency(0)}
+          sub={`Moy. mensuelle : ${formatCurrency(stats.avgMonthlyConsumables)} · déduit de la tréso`}
+          valueColor={stats.consumablesTotal > 0 ? 'text-red-400' : 'text-zinc-500'}
+          accent="bg-red-400/10 border-red-400/20 text-red-400"
         />
       </div>
     </>

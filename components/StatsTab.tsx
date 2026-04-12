@@ -9,13 +9,14 @@ import { InventoryItem } from '@/types'
 import { formatCurrency } from '@/lib/calculations'
 import {
   TrendingUp, TrendingDown, ShoppingBag, Clock,
-  Zap, BarChart2, Minus, Award,
+  Zap, BarChart2, Minus, Award, Package,
 } from 'lucide-react'
 
 type Period = '7j' | '1m' | '3m' | '6m' | '1an' | 'all'
 
 interface StatsTabProps {
   items: InventoryItem[]
+  consumablesTotal: number
 }
 
 const PERIODS: { key: Period; label: string }[] = [
@@ -51,10 +52,12 @@ function prevPeriodStart(p: Period): Date | null {
 
 function filterSold(items: InventoryItem[], from: Date | null, to: Date | null = null): InventoryItem[] {
   return items.filter((i) => {
-    if (i.status !== 'Vendu' || !i.sold_at) return false
-    const d = new Date(i.sold_at)
-    if (from && d < from) return false
-    if (to   && d >= to)  return false
+    if (i.status !== 'Vendu') return false
+    if (from || to) {
+      const d = new Date(i.sold_at ?? i.created_at)
+      if (from && d < from) return false
+      if (to   && d >= to)  return false
+    }
     return true
   })
 }
@@ -172,7 +175,7 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
   )
 }
 
-export default function StatsTab({ items }: StatsTabProps) {
+export default function StatsTab({ items, consumablesTotal }: StatsTabProps) {
   const [period, setPeriod] = useState<Period>('1m')
 
   const currentStart = useMemo(() => periodStart(period), [period])
@@ -281,6 +284,22 @@ export default function StatsTab({ items }: StatsTabProps) {
           sub={<span className="text-[11px] text-zinc-600">{currentSold.filter(i => i.boost_cost > 0).length} produit{currentSold.filter(i => i.boost_cost > 0).length > 1 ? 's' : ''} boosté{currentSold.filter(i => i.boost_cost > 0).length > 1 ? 's' : ''}</span>}
           accent="bg-amber-400/10 border-amber-400/20 text-amber-400"
           valueColor={boostBudget > 0 ? 'text-amber-400' : 'text-zinc-500'}
+        />
+        <KpiCard
+          icon={Package}
+          label="Coût logistique"
+          value={consumablesTotal > 0 ? `-${formatCurrency(consumablesTotal)}` : formatCurrency(0)}
+          sub={<span className="text-[11px] text-zinc-600">Emballages, expédition, divers</span>}
+          accent="bg-red-400/10 border-red-400/20 text-red-400"
+          valueColor={consumablesTotal > 0 ? 'text-red-400' : 'text-zinc-500'}
+        />
+        <KpiCard
+          icon={TrendingUp}
+          label="Résultat net réel"
+          value={formatCurrency(netProfit - consumablesTotal, true)}
+          sub={<span className="text-[11px] text-zinc-600">Ventes − achats − frais − logistique</span>}
+          accent={(netProfit - consumablesTotal) >= 0 ? 'bg-emerald-400/10 border-emerald-400/20 text-emerald-400' : 'bg-red-400/10 border-red-400/20 text-red-400'}
+          valueColor={(netProfit - consumablesTotal) >= 0 ? 'text-emerald-400' : 'text-red-400'}
         />
       </div>
 
