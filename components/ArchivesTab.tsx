@@ -69,16 +69,31 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
 
   if (allEntries.length === 0 && orphanHits.length === 0) return <EmptyArchives />
 
-  // ── Totaux : unités + hits + lots ──
-  const totalRevenue = allEntries.reduce((s, i) => {
-    if (i.is_lot) return s + (i.revenue_generated ?? 0)
-    return s + (i.actual_sale_price ?? 0)
-  }, 0)
-  // Coût uniquement sur les articles "racines" (pas les hits dont le coût est porté par le lot)
-  const totalCost    = soldItems.reduce((s, i) => s + i.purchase_price + i.vinted_fees + i.boost_cost, 0)
-  const totalFees    = allEntries.reduce((s, i) => s + i.sale_fees, 0)
+  // ── Totaux : même logique que calcStats (pas de double comptage) ──
+  // Source unique : revenue_generated pour les lots (= Σ actual_sale_price des hits)
+  // → ne jamais additionner les prix des hits séparément
+  const soldSingles  = items.filter(i => i.status === 'Vendu' && !i.is_hit && !i.is_lot)
+  const soldLots     = items.filter(i => i.status === 'Vendu' && i.is_lot)
+  const partialLots  = items.filter(i => i.is_lot && i.status !== 'Vendu' && (i.revenue_generated ?? 0) > 0)
+
+  const totalRevenue =
+    soldSingles.reduce((s, i) => s + (i.actual_sale_price ?? 0), 0) +
+    soldLots.reduce((s, i) => s + (i.revenue_generated ?? 0), 0) +
+    partialLots.reduce((s, i) => s + (i.revenue_generated ?? 0), 0)
+
+  const totalCost =
+    soldSingles.reduce((s, i) => s + i.purchase_price + i.vinted_fees + i.boost_cost, 0) +
+    soldLots.reduce((s, i) => s + i.purchase_price + i.vinted_fees + i.boost_cost, 0)
+
+  const totalFees =
+    soldSingles.reduce((s, i) => s + i.sale_fees, 0) +
+    soldLots.reduce((s, i) => s + i.sale_fees, 0) +
+    partialLots.reduce((s, i) => s + i.sale_fees, 0)
+
   const totalProfit  = totalRevenue - totalFees - totalCost
-  const totalPurchase = soldItems.reduce((s, i) => s + i.purchase_price, 0)
+  const totalPurchase =
+    soldSingles.reduce((s, i) => s + i.purchase_price, 0) +
+    soldLots.reduce((s, i) => s + i.purchase_price, 0)
   const overallROI   = totalPurchase > 0 ? (totalProfit / totalPurchase) * 100 : 0
 
   const delays = soldItems

@@ -29,15 +29,10 @@ export function calcItem(item: InventoryItem): ItemWithCalc {
 export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPITAL, consumables: Consumable[] = [], owedRomain = 0, owedCelian = 0): DashboardStats {
   const realItems = items.filter((i) => !i.is_hit && !(i.lot_id !== null && !i.is_lot))
 
-  const sold     = realItems.filter((i) => i.status === 'Vendu')
-  // Aligner avec Archives : seuls les hits avec un prix réel comptent
-  const soldHits = items.filter((i) => i.is_hit && i.actual_sale_price != null)
-  const stock    = realItems.filter((i) => i.status === 'En Attente' || i.status === 'En Stock' || i.status === 'Sur Vinted' || i.status === 'Partiellement vendu')
+  const sold  = realItems.filter((i) => i.status === 'Vendu')
+  const stock = realItems.filter((i) => i.status === 'En Attente' || i.status === 'En Stock' || i.status === 'Sur Vinted' || i.status === 'Partiellement vendu')
 
-  // Valeur stock = somme des prix d'achat des articles non vendus
   const stockValue = stock.reduce((s, i) => s + i.purchase_price, 0)
-
-  const hitsReceived = soldHits.reduce((s, i) => s + (i.actual_sale_price ?? 0) - i.sale_fees, 0)
 
   // Consommables
   const consumablesTotal = consumables.reduce((s, c) => s + c.price * (c.quantity ?? 1), 0)
@@ -48,69 +43,65 @@ export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPIT
   })
   const monthValues = Object.values(consumablesByMonth)
   const avgMonthlyConsumables = monthValues.length > 0
-    ? monthValues.reduce((a, b) => a + b, 0) / monthValues.length
-    : 0
+    ? monthValues.reduce((a, b) => a + b, 0) / monthValues.length : 0
 
-  // Bénéfice net : boost déduit du bénéfice (pas du CA)
-  // Pour les lots, revenue_generated = somme cumulée des ventes réelles
-  const netProfit = sold.reduce((s, i) => {
-    const cost    = i.purchase_price + i.vinted_fees + i.boost_cost
-    const revenue = i.is_lot ? (i.revenue_generated ?? 0) : (i.actual_sale_price ?? 0)
-    return s + revenue - i.sale_fees - cost
-  }, 0) + hitsReceived
+  // ── Source unique de vérité : revenue_generated pour les lots ──────────────
+  // Les hits individuels (actual_sale_price) ne sont JAMAIS ajoutés séparément :
+  // revenue_generated = Σ actual_sale_price des hits → les additionner serait un double-comptage.
+  const netProfit =
+    // 1. Articles individuels vendus (non-lot)
+    sold.filter(i => !i.is_lot).reduce((s, i) => {
+      const cost = i.purchase_price + i.vinted_fees + i.boost_cost
+      return s + (i.actual_sale_price ?? 0) - i.sale_fees - cost
+    }, 0)
+    // 2. Lots complètement vendus : revenu - coût total (lot hors stockValue)
+    + sold.filter(i => i.is_lot).reduce((s, i) => {
+      const cost = i.purchase_price + i.vinted_fees + i.boost_cost
+      return s + (i.revenue_generated ?? 0) - i.sale_fees - cost
+    }, 0)
+    // 3. Lots partiellement vendus : revenu reçu seulement (coût encore dans stockValue)
+    + realItems.filter(i => i.is_lot && i.status !== 'Vendu' && (i.revenue_generated ?? 0) > 0)
+      .reduce((s, i) => s + (i.revenue_generated ?? 0) - i.sale_fees, 0)
 
-  // Trésorerie = Capital initial + Bénéfices réalisés - Valeur stock actuel - consommables - dettes
   const cashInHand     = initialCapital + netProfit - stockValue - consumablesTotal - owedRomain - owedCelian
   const currentCapital = cashInHand + stockValue
 
   // Financement perso
-  const romainContribution = realItems
-    .filter((i) => i.funded_by === 'ROMAIN_PERSO')
-    .reduce((s, i) => s + i.purchase_price, 0)
-  const celianContribution = realItems
-    .filter((i) => i.funded_by === 'CELIAN_PERSO')
-    .reduce((s, i) => s + i.purchase_price, 0)
+  const romainContribution = realItems.filter(i => i.funded_by === 'ROMAIN_PERSO').reduce((s, i) => s + i.purchase_price, 0)
+  const celianContribution = realItems.filter(i => i.funded_by === 'CELIAN_PERSO').reduce((s, i) => s + i.purchase_price, 0)
 
-  // ROI moyen — dénominateur = purchase_price (formule : (Vente - (Achat+Frais+Boost)) / Achat)
-  const roiValues = sold
-    .map((i) => {
-      if (i.purchase_price === 0) return null
-      const cost    = i.purchase_price + i.vinted_fees + i.boost_cost
-      const revenue = i.is_lot ? (i.revenue_generated ?? 0) : (i.actual_sale_price ?? 0)
-      if (!revenue) return null
-      return ((revenue - i.sale_fees - cost) / i.purchase_price) * 100
-    })
-    .filter((v): v is number => v !== null)
+  // ROI moyen (articles + lots vendus)
+  const roiValues = [
+    ...sold.filter(i => !i.is_lot && i.purchase_price > 0 && i.actual_sale_price != null).map(i => {
+      const cost = i.purchase_price + i.vinted_fees + i.boost_cost
+      return ((i.actual_sale_price! - i.sale_fees - cost) / i.purchase_price) * 100
+    }),
+    ...sold.filter(i => i.is_lot && i.purchase_price > 0 && (i.revenue_generated ?? 0) > 0).map(i => {
+      const cost = i.purchase_price + i.vinted_fees + i.boost_cost
+      return ((i.revenue_generated! - i.sale_fees - cost) / i.purchase_price) * 100
+    }),
+  ]
+  const avgROI = roiValues.length > 0 ? roiValues.reduce((a, b) => a + b, 0) / roiValues.length : 0
 
-  const avgROI = roiValues.length > 0
-    ? roiValues.reduce((a, b) => a + b, 0) / roiValues.length
-    : 0
+  // Nb hits vendus (affichage uniquement, pas dans les calculs financiers)
+  const soldHitsCount = items.filter(i => i.is_hit && i.actual_sale_price != null).length
 
-  // Valeur estimée stock + hits
-  const stockHits = items.filter((i) => i.is_hit && (i.status === 'En Attente' || i.status === 'En Stock' || i.status === 'Sur Vinted' || i.status === 'Partiellement vendu'))
-  const pendingValue = [...stock, ...stockHits].reduce((s, i) => {
-    if (i.expected_sale_price) return s + i.expected_sale_price
-    return s
-  }, 0)
+  // Valeur estimée stock
+  const stockHits = items.filter(i => i.is_hit && (i.status === 'En Attente' || i.status === 'En Stock' || i.status === 'Sur Vinted' || i.status === 'Partiellement vendu'))
+  const pendingValue = [...stock, ...stockHits].reduce((s, i) => i.expected_sale_price ? s + i.expected_sale_price : s, 0)
 
-  const delays = sold
-    .filter((i) => i.sold_at)
-    .map((i) => {
-      const start = i.posted_at ?? i.created_at
-      return (new Date(i.sold_at!).getTime() - new Date(start).getTime()) / (1000 * 60 * 60 * 24)
-    })
+  const delays = sold.filter(i => i.sold_at).map(i => {
+    const start = i.posted_at ?? i.created_at
+    return (new Date(i.sold_at!).getTime() - new Date(start).getTime()) / (1000 * 60 * 60 * 24)
+  })
   const avgSellDelay = delays.length > 0 ? delays.reduce((a, b) => a + b, 0) / delays.length : null
 
-  const stockValueCelian = stock
-    .filter((i) => i.location === 'Chez Célian')
-    .reduce((s, i) => s + i.purchase_price, 0)
-  const stockValueRomain = stock
-    .filter((i) => i.location === 'Chez Romain')
-    .reduce((s, i) => s + i.purchase_price, 0)
+  const stockValueCelian = stock.filter(i => i.location === 'Chez Célian').reduce((s, i) => s + i.purchase_price, 0)
+  const stockValueRomain = stock.filter(i => i.location === 'Chez Romain').reduce((s, i) => s + i.purchase_price, 0)
 
   return {
     currentCapital, cashInHand, stockValue, netProfit, avgROI,
-    stockCount: stock.length, soldCount: sold.length + soldHits.length, pendingValue,
+    stockCount: stock.length, soldCount: sold.length + soldHitsCount, pendingValue,
     avgSellDelay, stockValueCelian, stockValueRomain,
     romainContribution, celianContribution,
     consumablesTotal, avgMonthlyConsumables,
