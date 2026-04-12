@@ -30,7 +30,8 @@ export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPIT
   const realItems = items.filter((i) => !i.is_hit && !(i.lot_id !== null && !i.is_lot))
 
   const sold     = realItems.filter((i) => i.status === 'Vendu')
-  const soldHits = items.filter((i) => i.is_hit && i.status === 'Vendu')
+  // Aligner avec Archives : seuls les hits avec un prix réel comptent
+  const soldHits = items.filter((i) => i.is_hit && i.actual_sale_price != null)
   const stock    = realItems.filter((i) => i.status === 'En Attente' || i.status === 'En Stock' || i.status === 'Sur Vinted' || i.status === 'Partiellement vendu')
 
   // Valeur stock = somme des prix d'achat des articles non vendus
