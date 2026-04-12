@@ -289,22 +289,23 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
 
                         {/* Actions */}
                         <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
-                          {!isHit && (
-                            <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                            {!isHit && (
                               <button
                                 onClick={() => onEdit(item)}
                                 className="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-600 hover:text-white hover:bg-zinc-800 transition-colors"
                               >
                                 <Pencil size={12} />
                               </button>
-                              <button
-                                onClick={() => onDelete(item)}
-                                className="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-400/10 transition-colors"
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
-                          )}
+                            )}
+                            <button
+                              onClick={() => onDelete(item)}
+                              className="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                              title={isHit ? 'Supprimer ce hit' : 'Supprimer'}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )
