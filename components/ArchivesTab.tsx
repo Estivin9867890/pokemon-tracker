@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { InventoryItem } from '@/types'
 import { calcItem, formatCurrency, formatROI, roiColor } from '@/lib/calculations'
-import { Pencil, Trash2, Archive, StickyNote, TrendingUp, TrendingDown, AlertCircle, Check, Loader2, Sparkles } from 'lucide-react'
+import { Pencil, Trash2, Archive, StickyNote, TrendingUp, TrendingDown, AlertCircle, Check, Loader2, Sparkles, Search, X } from 'lucide-react'
 
 interface ArchivesTabProps {
   items: InventoryItem[]
@@ -33,6 +33,7 @@ function formatDate(dateStr: string) {
 export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDetail, onPatchSalePrice }: ArchivesTabProps) {
   const [patchPrices, setPatchPrices] = useState<Record<string, string>>({})
   const [patching, setPatching]       = useState<Record<string, boolean>>({})
+  const [search, setSearch]           = useState('')
 
   // Index parent lots by lot_id pour afficher le nom du lot sur les hits
   const lotByLotId = items.reduce<Record<string, InventoryItem>>((acc, i) => {
@@ -62,9 +63,38 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
   const soldLots     = items.filter(i => i.status === 'Vendu' && i.is_lot)
   const partialLots  = items.filter(i => i.is_lot && i.status !== 'Vendu' && (i.revenue_generated ?? 0) > 0)
 
+  // Index des hits vendus par parent_lot_id (pour la deep search)
+  const soldHitsByParent = soldHits.reduce<Record<string, InventoryItem[]>>((acc, h) => {
+    if (h.parent_lot_id) {
+      if (!acc[h.parent_lot_id]) acc[h.parent_lot_id] = []
+      acc[h.parent_lot_id].push(h)
+    }
+    return acc
+  }, {})
+
   // Liste unifiée triée par date (inclut les lots partiellement vendus avec revenue)
   const allEntries = [...soldItems, ...soldHits, ...partialLots]
     .sort((a, b) => new Date(b.sold_at ?? b.created_at).getTime() - new Date(a.sold_at ?? a.created_at).getTime())
+
+  // Filtrage par recherche — KPIs non affectés, uniquement la liste
+  const q = search.trim().toLowerCase()
+  const matchesItem = (i: InventoryItem) =>
+    i.item_name?.toLowerCase().includes(q) ||
+    i.pokemon_name?.toLowerCase().includes(q) ||
+    i.card_number?.toLowerCase().includes(q) ||
+    i.extension?.toLowerCase().includes(q) ||
+    i.rarity?.toLowerCase().includes(q)
+
+  const visibleEntries = q
+    ? allEntries.filter((i) => {
+        if (matchesItem(i)) return true
+        // Lots : chercher dans les hits vendus à l'intérieur
+        if (i.is_lot) {
+          return (soldHitsByParent[i.lot_id ?? ''] ?? []).some(matchesItem)
+        }
+        return false
+      })
+    : allEntries
 
   async function handlePatch(item: InventoryItem) {
     const price = parseFloat(patchPrices[item.id] ?? '')
@@ -146,7 +176,7 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
 
       {allEntries.length === 0 ? <EmptyArchives /> : (
         <>
-          {/* ── KPIs ── */}
+          {/* ── KPIs globaux — toujours visibles ── */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="bg-[#111113] border border-zinc-800/80 rounded-2xl p-4">
               <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Bénéfice net</p>
@@ -176,7 +206,27 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
             </div>
           </div>
 
+          {/* ── Barre de recherche ── */}
+          <div className="relative max-w-sm">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Rechercher une vente…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-8 pr-8 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:border-zinc-600 focus:ring-zinc-600/20 transition-colors"
+            />
+            {search && (
+              <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors">
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
           {/* ── Table unifiée ── */}
+          {visibleEntries.length === 0 ? (
+            <p className="text-sm text-zinc-500 text-center py-10">Aucun résultat pour &quot;{search}&quot;</p>
+          ) :
           <div className="bg-[#111113] border border-zinc-800/80 rounded-2xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -194,7 +244,7 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/40">
-                  {allEntries.map((item) => {
+                  {visibleEntries.map((item) => {
                     const isHit       = item.is_hit
                     const parentLot   = isHit && item.parent_lot_id ? lotByLotId[item.parent_lot_id] : null
                     const salePrice   = item.is_lot ? (item.revenue_generated ?? null) : item.actual_sale_price
@@ -333,6 +383,7 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
               </table>
             </div>
           </div>
+          }
         </>
       )}
     </div>
