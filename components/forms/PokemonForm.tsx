@@ -262,7 +262,7 @@ export default function PokemonForm({
                             type="number"
                             step="0.01"
                             min="0"
-                            placeholder="Prix estimé"
+                            placeholder="Coût achat"
                             value={hit.estimated_value}
                             onChange={(e) => updateHit(i, 'estimated_value', e.target.value)}
                             className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 pr-5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-400/40 transition-colors"
@@ -282,7 +282,7 @@ export default function PokemonForm({
 
                   {(form.hits ?? []).length > 0 && form.lot_total_cost && (
                     <p className="text-[10px] text-zinc-500 text-center mt-1">
-                      Valeur estimée hits :{' '}
+                      Coût estimé hits :{' '}
                       <span className="text-amber-400 font-semibold">
                         {formatCurrency((form.hits ?? []).reduce((s, h) => s + (parseFloat(h.estimated_value) || 0), 0))}
                       </span>
@@ -388,7 +388,7 @@ export default function PokemonForm({
                     />
                     <div className="relative">
                       <input
-                        type="number" step="0.01" min="0" placeholder="Prix estimé"
+                        type="number" step="0.01" min="0" placeholder="Coût achat"
                         value={hit.estimated_value}
                         onChange={(e) => updateHit(i, 'estimated_value', e.target.value)}
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 pr-5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-400/40 transition-colors"
@@ -408,7 +408,7 @@ export default function PokemonForm({
 
             {(form.hits ?? []).length > 0 && form.lot_total_cost && (
               <p className="text-[10px] text-zinc-500 text-center">
-                Valeur estimée hits :{' '}
+                Coût estimé hits :{' '}
                 <span className="text-amber-400 font-semibold">
                   {formatCurrency((form.hits ?? []).reduce((s, h) => s + (parseFloat(h.estimated_value) || 0), 0))}
                 </span>

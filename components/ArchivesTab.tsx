@@ -81,10 +81,11 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
     soldLots.reduce((s, i) => s + (i.revenue_generated ?? 0), 0) +
     partialLots.reduce((s, i) => s + (i.revenue_generated ?? 0), 0)
 
+  // Coût total : singles (coût réel) + hits vendus (coût estimé par hit)
+  const soldHitsForCost = items.filter(i => i.is_hit && i.actual_sale_price != null)
   const totalCost =
     soldSingles.reduce((s, i) => s + i.purchase_price + i.vinted_fees + i.boost_cost, 0) +
-    soldLots.reduce((s, i) => s + i.purchase_price + i.vinted_fees + i.boost_cost, 0) +
-    partialLots.reduce((s, i) => s + i.purchase_price + i.vinted_fees + i.boost_cost, 0)
+    soldHitsForCost.reduce((s, h) => s + (h.expected_sale_price ?? 0), 0)
 
   const totalFees =
     soldSingles.reduce((s, i) => s + i.sale_fees, 0) +
@@ -92,10 +93,7 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
     partialLots.reduce((s, i) => s + i.sale_fees, 0)
 
   const totalProfit  = totalRevenue - totalFees - totalCost
-  const totalPurchase =
-    soldSingles.reduce((s, i) => s + i.purchase_price, 0) +
-    soldLots.reduce((s, i) => s + i.purchase_price, 0)
-  const overallROI   = totalPurchase > 0 ? (totalProfit / totalPurchase) * 100 : 0
+  const overallROI   = totalCost > 0 ? (totalProfit / totalCost) * 100 : 0
 
   const delays = soldItems
     .filter((i) => i.sold_at)
@@ -200,11 +198,16 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
                     const isHit       = item.is_hit
                     const parentLot   = isHit && item.parent_lot_id ? lotByLotId[item.parent_lot_id] : null
                     const salePrice   = item.is_lot ? (item.revenue_generated ?? null) : item.actual_sale_price
-                    const costBasis   = isHit ? 0 : item.purchase_price + item.vinted_fees + item.boost_cost
+                    // Hits : coût = prix d'achat estimé ; lots/singles : coût réel
+                    const costBasis   = isHit
+                      ? (item.expected_sale_price ?? 0)
+                      : item.purchase_price + item.vinted_fees + item.boost_cost
                     const marginNet   = salePrice != null ? salePrice - item.sale_fees - costBasis : null
-                    const roiVal      = !isHit && item.purchase_price > 0 && marginNet != null
-                      ? parseFloat(((marginNet / item.purchase_price) * 100).toFixed(1))
-                      : null
+                    const roiVal      = marginNet != null && costBasis > 0
+                      ? parseFloat(((marginNet / costBasis) * 100).toFixed(1))
+                      : !isHit && item.purchase_price > 0 && marginNet != null
+                        ? parseFloat(((marginNet / item.purchase_price) * 100).toFixed(1))
+                        : null
                     const meetsTarget = (roiVal ?? 0) >= roiTarget
                     const isProfit    = (marginNet ?? 0) >= 0
 

@@ -55,9 +55,24 @@ function saleRevenue(item: InventoryItem): number {
   return item.is_lot ? (item.revenue_generated ?? 0) : (item.actual_sale_price ?? 0)
 }
 
+// Coût : prix d'achat estimé pour les hits, coût réel pour les autres
+function itemCost(item: InventoryItem): number {
+  if (item.is_hit) return item.expected_sale_price ?? 0
+  return item.purchase_price + item.vinted_fees + item.boost_cost
+}
+
+// Profit d'un lot = Σ hits (prix réel − coût estimé) − frais vente lot
+function lotHitProfitFrom(lot: InventoryItem, allItems: InventoryItem[]): number {
+  const hits = allItems.filter(i => i.is_hit && i.parent_lot_id === lot.lot_id && i.actual_sale_price != null)
+  return hits.reduce((s, h) => s + (h.actual_sale_price ?? 0) - (h.expected_sale_price ?? 0), 0) - lot.sale_fees
+}
+
 function filterSold(items: InventoryItem[], from: Date | null, to: Date | null = null): InventoryItem[] {
   return items.filter((i) => {
     // Inclure les articles vendus ET les lots partiellement vendus avec revenu
+    // Exclure les hits (traités via leur lot parent) et les items de lot non-lot
+    if (i.is_hit) return false
+    if (i.lot_id !== null && !i.is_lot) return false
     const hasRevenue = i.is_lot && i.status !== 'Vendu' && (i.revenue_generated ?? 0) > 0
     if (i.status !== 'Vendu' && !hasRevenue) return false
     if (from || to) {
@@ -69,7 +84,7 @@ function filterSold(items: InventoryItem[], from: Date | null, to: Date | null =
   })
 }
 
-function buildChartData(sold: InventoryItem[], period: Period) {
+function buildChartData(sold: InventoryItem[], period: Period, allItems: InventoryItem[]) {
   const groupByMonth = period === '1an' || period === 'all'
   const map: Record<string, { key: string; ca: number; profit: number; count: number }> = {}
 
@@ -81,9 +96,12 @@ function buildChartData(sold: InventoryItem[], period: Period) {
       : d.toISOString().split('T')[0]
 
     if (!map[key]) map[key] = { key, ca: 0, profit: 0, count: 0 }
-    const cost = item.purchase_price + item.vinted_fees + item.boost_cost
-    map[key].ca      += saleRevenue(item)
-    map[key].profit  += saleRevenue(item) - item.sale_fees - cost
+    const ca = saleRevenue(item)
+    const profit = item.is_lot
+      ? lotHitProfitFrom(item, allItems)
+      : ca - item.sale_fees - itemCost(item)
+    map[key].ca      += ca
+    map[key].profit  += profit
     map[key].count   += 1
   })
 
@@ -99,15 +117,18 @@ function buildChartData(sold: InventoryItem[], period: Period) {
     }))
 }
 
-function buildTop5Extensions(sold: InventoryItem[]) {
+function buildTop5Extensions(sold: InventoryItem[], allItems: InventoryItem[]) {
   const map: Record<string, { count: number; ca: number; profit: number }> = {}
   sold.forEach((item) => {
     const ext = item.extension?.trim() || 'Inconnue'
     if (!map[ext]) map[ext] = { count: 0, ca: 0, profit: 0 }
-    const cost = item.purchase_price + item.vinted_fees + item.boost_cost
+    const ca = saleRevenue(item)
+    const profit = item.is_lot
+      ? lotHitProfitFrom(item, allItems)
+      : ca - item.sale_fees - itemCost(item)
     map[ext].count  += 1
-    map[ext].ca     += saleRevenue(item)
-    map[ext].profit += saleRevenue(item) - item.sale_fees - cost
+    map[ext].ca     += ca
+    map[ext].profit += profit
   })
   return Object.entries(map)
     .map(([ext, d]) => ({ ext, ...d, avgProfit: d.count > 0 ? d.profit / d.count : 0 }))
@@ -115,14 +136,15 @@ function buildTop5Extensions(sold: InventoryItem[]) {
     .slice(0, 5)
 }
 
-function buildTypeData(sold: InventoryItem[]) {
+function buildTypeData(sold: InventoryItem[], allItems: InventoryItem[]) {
   let cartes = 0
   let scelles = 0
   let profitCartes = 0
   let profitScelles = 0
   sold.forEach((item) => {
-    const cost = item.purchase_price + item.vinted_fees + item.boost_cost
-    const profit = saleRevenue(item) - item.sale_fees - cost
+    const profit = item.is_lot
+      ? lotHitProfitFrom(item, allItems)
+      : saleRevenue(item) - item.sale_fees - itemCost(item)
     if (item.pokemon_category === 'SEALED') { scelles++; profitScelles += profit }
     else { cartes++; profitCartes += profit }
   })
@@ -196,17 +218,15 @@ export default function StatsTab({ items, consumablesTotal }: StatsTabProps) {
   const prevCa  = prevSold.reduce((s, i) => s + saleRevenue(i), 0)
   const caEvol  = prevCa > 0 ? ((ca - prevCa) / prevCa) * 100 : null
 
-  const totalCost     = currentSold.reduce((s, i) => s + i.purchase_price + i.vinted_fees + i.boost_cost, 0)
   const totalSaleFees = currentSold.reduce((s, i) => s + i.sale_fees, 0)
-  const netProfit     = ca - totalSaleFees - totalCost
+  const netProfit = currentSold.reduce((s, i) =>
+    s + (i.is_lot ? lotHitProfitFrom(i, items) : saleRevenue(i) - i.sale_fees - itemCost(i)), 0)
   const avgNetProfit  = currentSold.length > 0 ? netProfit / currentSold.length : 0
 
   const boostBudget = currentSold.reduce((s, i) => s + i.boost_cost, 0)
 
-  const prevNet    = prevSold.reduce((s, i) => {
-    const cost = i.purchase_price + i.vinted_fees + i.boost_cost
-    return s + saleRevenue(i) - i.sale_fees - cost
-  }, 0)
+  const prevNet = prevSold.reduce((s, i) =>
+    s + (i.is_lot ? lotHitProfitFrom(i, items) : saleRevenue(i) - i.sale_fees - itemCost(i)), 0)
   const profitEvol = prevNet !== 0 ? ((netProfit - prevNet) / Math.abs(prevNet)) * 100 : null
 
   const delays = currentSold
@@ -220,9 +240,9 @@ export default function StatsTab({ items, consumablesTotal }: StatsTabProps) {
   const stockListed = items.filter((i) => i.status !== 'Vendu').length
 
   // ── Chart & Data ──
-  const chartData    = useMemo(() => buildChartData(currentSold, period), [currentSold, period])
-  const top5         = useMemo(() => buildTop5Extensions(currentSold), [currentSold])
-  const typeData     = useMemo(() => buildTypeData(currentSold), [currentSold])
+  const chartData    = useMemo(() => buildChartData(currentSold, period, items), [currentSold, period, items])
+  const top5         = useMemo(() => buildTop5Extensions(currentSold, items), [currentSold, items])
+  const typeData     = useMemo(() => buildTypeData(currentSold, items), [currentSold, items])
 
   return (
     <div className="space-y-6">
