@@ -63,7 +63,7 @@ export default function StockTab({ items, roiTarget, onSell, onEdit, onDelete, o
           i.rarity?.toLowerCase().includes(q) ||
           i.extension?.toLowerCase().includes(q)
         if (selfMatch) return false
-        return (hitsByLotId[i.id] ?? []).some((h) =>
+        return (hitsByLotId[i.lot_id ?? ''] ?? []).some((h) =>
           h.item_name?.toLowerCase().includes(q) ||
           h.pokemon_name?.toLowerCase().includes(q) ||
           h.card_number?.toLowerCase().includes(q) ||
@@ -92,7 +92,7 @@ export default function StockTab({ items, roiTarget, onSell, onEdit, onDelete, o
       if (matchesSelf) return true
       // Pour les lots : chercher aussi dans les hits à l'intérieur
       if (i.is_lot) {
-        const hits = hitsByLotId[i.id] ?? []
+        const hits = hitsByLotId[i.lot_id ?? ''] ?? []
         return hits.some((h) =>
           h.item_name?.toLowerCase().includes(q) ||
           h.pokemon_name?.toLowerCase().includes(q) ||
