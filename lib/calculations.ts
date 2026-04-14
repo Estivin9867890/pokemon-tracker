@@ -99,9 +99,14 @@ export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPIT
   const stockValueCelian = stock.filter(i => i.location === 'Chez Célian').reduce((s, i) => s + i.purchase_price, 0)
   const stockValueRomain = stock.filter(i => i.location === 'Chez Romain').reduce((s, i) => s + i.purchase_price, 0)
 
+  // Comptage "industriel" : 1 hit = 1 article
+  const stockCount =
+    stock.filter((i) => !i.is_lot).length +
+    stock.filter((i) => i.is_lot).reduce((s, i) => s + (i.item_count ?? 0), 0)
+
   return {
     currentCapital, cashInHand, stockValue, netProfit, avgROI,
-    stockCount: stock.length, soldCount: sold.length + soldHitsCount, pendingValue,
+    stockCount, soldCount: sold.length + soldHitsCount, pendingValue,
     avgSellDelay, stockValueCelian, stockValueRomain,
     romainContribution, celianContribution,
     consumablesTotal, avgMonthlyConsumables,

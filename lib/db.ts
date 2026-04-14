@@ -66,7 +66,6 @@ export async function listItems(): Promise<InventoryItem[]> {
     .from('inventory')
     .select('*')
     .order('created_at', { ascending: false })
-    .limit(200)
   throwIf(error, 'listItems')
   return (data ?? []).map(rowToItem)
 }

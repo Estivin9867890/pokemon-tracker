@@ -16,12 +16,17 @@ interface PokemonFormProps {
   raritySearch: string
   setRaritySearch: Dispatch<SetStateAction<string>>
   onHitDeleted?: (hitId: string) => void
+  itemStatus?: string
+  cashInHand?: number
 }
 
 export default function PokemonForm({
   form, setForm, errors, roiTarget, isEdit,
   raritySearch, setRaritySearch, onHitDeleted,
+  itemStatus, cashInHand,
 }: PokemonFormProps) {
+  // Verrouillage comptabilité : lot validé (en stock) → prix figés
+  const lotLocked = isEdit && form.is_lot && itemStatus !== 'En Attente'
   const [calcOpen, setCalcOpen]       = useState(false)
   const [hitsEnabled, setHitsEnabled] = useState(false)
 
@@ -296,7 +301,14 @@ export default function PokemonForm({
       {/* ── ÉDITION LOT ─────────────────────────────────── */}
       {isEdit && form.is_lot && (
         <div className="space-y-3 border border-violet-500/20 rounded-2xl p-4 bg-violet-500/[0.03]">
-          <p className="text-[11px] font-semibold text-violet-400 uppercase tracking-widest">Paramètres du lot</p>
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-semibold text-violet-400 uppercase tracking-widest">Paramètres du lot</p>
+            {lotLocked && (
+              <span className="text-[10px] font-semibold text-amber-400 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full">
+                🔒 Comptabilité figée
+              </span>
+            )}
+          </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
@@ -306,7 +318,8 @@ export default function PokemonForm({
                   type="number" step="0.01" min="0" placeholder="120.00"
                   value={form.lot_total_cost}
                   onChange={(e) => setForm((p) => ({ ...p, lot_total_cost: e.target.value }))}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 pr-9 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:border-violet-500/50 focus:ring-violet-500/10 transition-colors"
+                  disabled={lotLocked}
+                  className={`w-full border rounded-xl px-3 py-2.5 pr-9 text-sm placeholder-zinc-600 focus:outline-none focus:ring-1 focus:border-violet-500/50 focus:ring-violet-500/10 transition-colors ${lotLocked ? 'bg-zinc-950 border-zinc-800/50 text-zinc-500 cursor-not-allowed' : 'bg-zinc-900 border-zinc-800 text-white'}`}
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-500">€</span>
               </div>
@@ -509,14 +522,13 @@ export default function PokemonForm({
         </div>
       </div>
 
-      {/* Financement */}
+      {/* Qui a acheté + avertissement trésorerie */}
       <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-medium text-zinc-400">Financé par</label>
+        <label className="text-xs font-medium text-zinc-400">Qui a acheté ? <span className="text-zinc-600">(depuis la cagnotte)</span></label>
         <div className="flex gap-2">
           {([
-            { value: 'CASH', label: '💰 Commun' },
-            { value: 'ROMAIN_PERSO', label: '👤 Romain' },
-            { value: 'CELIAN_PERSO', label: '👤 Célian' },
+            { value: 'ROMAIN_PERSO', label: '🛒 Romain' },
+            { value: 'CELIAN_PERSO', label: '🛒 Célian' },
           ] as const).map(({ value, label }) => (
             <button
               key={value}
@@ -532,6 +544,19 @@ export default function PokemonForm({
             </button>
           ))}
         </div>
+        {cashInHand !== undefined && (() => {
+          const cost = form.is_lot
+            ? (parseFloat(form.lot_total_cost) || 0)
+            : (parseFloat(form.purchase_price) || 0)
+          if (cost > 0 && cost > cashInHand) {
+            return (
+              <p className="text-[11px] text-amber-400 bg-amber-400/8 border border-amber-400/20 rounded-xl px-3 py-2 mt-0.5">
+                ⚠️ Trésorerie insuffisante — Cagnotte : {cashInHand.toFixed(2)}€ · Achat : {cost.toFixed(2)}€ (manque {(cost - cashInHand).toFixed(2)}€)
+              </p>
+            )
+          }
+          return null
+        })()}
       </div>
 
       {/* Grading */}

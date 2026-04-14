@@ -21,16 +21,24 @@ import DeleteModal from '@/components/DeleteModal'
 import SettingsModal from '@/components/SettingsModal'
 import LogistiqueModal from '@/components/LogistiqueModal'
 import { Plus, Package, Archive, Loader2, Target, PieChart, Settings, BarChart2, Layers, PackageOpen, Truck } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 
 type Tab = 'stock' | 'archives' | 'stats' | 'objectifs' | 'tresorerie' | 'logistique'
 
 export default function DashboardPage() {
+  const router = useRouter()
   const [items, setItems]           = useState<InventoryItem[]>([])
   const [consumables, setConsumables] = useState<Consumable[]>([])
   const [settings, setSettings]     = useState<AppSettings>(DEFAULT_SETTINGS)
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState<string | null>(null)
   const [activeTab, setActiveTab]   = useState<Tab>('stock')
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !localStorage.getItem('pokemon_auth')) {
+      router.replace('/')
+    }
+  }, [router])
 
   // Modals
   const [addEditOpen, setAddEditOpen]     = useState(false)
@@ -161,7 +169,7 @@ export default function DashboardPage() {
   }
 
   const isVisible = (i: InventoryItem) => !i.is_hit && !(i.lot_id !== null && !i.is_lot)
-  const stockCount = items.filter((i) => isVisible(i) && (i.status === 'En Attente' || i.status === 'En Stock' || i.status === 'Sur Vinted' || i.status === 'Partiellement vendu')).length
+  const stockCount = stats.stockCount
   const soldCount  = items.filter((i) => isVisible(i) && i.status === 'Vendu').length
 
   return (
@@ -296,6 +304,7 @@ export default function DashboardPage() {
         existingHits={editItemState?.is_lot ? items.filter((i) => i.is_hit && i.parent_lot_id === editItemState.lot_id) : []}
         roiTarget={settings.roi_target}
         defaultVintedFees={settings.default_vinted_fees}
+        cashInHand={stats.cashInHand}
       />
       <SellModal
         open={!!sellItem}

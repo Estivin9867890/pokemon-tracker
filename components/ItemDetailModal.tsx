@@ -128,6 +128,11 @@ export default function ItemDetailModal({ open, onClose, item, roiTarget }: Item
           ) : (
             <>
               <Row label="Prix d'achat">{formatCurrency(item.purchase_price)}</Row>
+              {item.card_number && (
+                <Row label="Numéro de carte">
+                  <span className="font-mono text-zinc-300">#{item.card_number}</span>
+                </Row>
+              )}
               {item.vinted_fees > 0 && (
                 <Row label="Frais Vinted (achat)">{formatCurrency(item.vinted_fees)}</Row>
               )}
@@ -137,8 +142,8 @@ export default function ItemDetailModal({ open, onClose, item, roiTarget }: Item
             </>
           )}
           {item.funded_by && item.funded_by !== 'CASH' && (
-            <Row label="Financé par">
-              <span className="text-amber-400">{item.funded_by === 'ROMAIN_PERSO' ? 'Romain (perso)' : 'Célian (perso)'}</span>
+            <Row label="Acheté par">
+              <span className="text-amber-400">{item.funded_by === 'ROMAIN_PERSO' ? 'Romain' : 'Célian'}</span>
             </Row>
           )}
         </Section>

@@ -58,6 +58,8 @@ export default function StockTab({ items, roiTarget, onSell, onEdit, onDelete, o
     })
     .filter((i) => {
       if (!q) return true
+      // La recherche ne porte que sur les cartes à l'unité et les hits (pas les lots)
+      if (i.is_lot) return false
       return (
         i.item_name?.toLowerCase().includes(q) ||
         i.pokemon_name?.toLowerCase().includes(q) ||

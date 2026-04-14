@@ -13,6 +13,7 @@ interface AddEditModalProps {
   existingHits?: InventoryItem[]
   roiTarget: number
   defaultVintedFees: number
+  cashInHand?: number
 }
 
 function emptyForm(defaultVintedFees: number): ItemFormData {
@@ -40,7 +41,7 @@ function emptyForm(defaultVintedFees: number): ItemFormData {
   }
 }
 
-export default function AddEditModal({ open, onClose, onSave, item, existingHits = [], roiTarget, defaultVintedFees }: AddEditModalProps) {
+export default function AddEditModal({ open, onClose, onSave, item, existingHits = [], roiTarget, defaultVintedFees, cashInHand }: AddEditModalProps) {
   const isEdit = !!item
   const [form, setForm]               = useState<ItemFormData>(() => emptyForm(defaultVintedFees))
   const [errors, setErrors]           = useState<Partial<Record<keyof ItemFormData, string>>>({})
@@ -138,6 +139,8 @@ export default function AddEditModal({ open, onClose, onSave, item, existingHits
             raritySearch={raritySearch}
             setRaritySearch={setRaritySearch}
             onHitDeleted={handleHitDeleted}
+            itemStatus={item?.status}
+            cashInHand={cashInHand}
           />
 
           {/* Notes */}
