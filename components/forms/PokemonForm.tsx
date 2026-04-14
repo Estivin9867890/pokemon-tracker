@@ -25,8 +25,7 @@ export default function PokemonForm({
   raritySearch, setRaritySearch, onHitDeleted,
   itemStatus, cashInHand,
 }: PokemonFormProps) {
-  // Verrouillage comptabilité : lot validé (en stock) → prix figés
-  const lotLocked = isEdit && form.is_lot && itemStatus !== 'En Attente'
+  const lotLocked = false
   const [calcOpen, setCalcOpen]       = useState(false)
   const [hitsEnabled, setHitsEnabled] = useState(false)
 

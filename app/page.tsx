@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Layers, Lock, Eye, EyeOff } from 'lucide-react'
 
 // Mot de passe modifiable ici ou via NEXT_PUBLIC_GATE_PASSWORD dans .env.local
-const GATE_PASSWORD = process.env.NEXT_PUBLIC_GATE_PASSWORD ?? 'pokemon2025'
+const GATE_PASSWORD = process.env.NEXT_PUBLIC_GATE_PASSWORD ?? 'Ccbdg'
 
 export default function GatePage() {
   const router = useRouter()
