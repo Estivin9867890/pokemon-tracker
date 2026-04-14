@@ -1,17 +1,13 @@
-export interface PokemonCard {
-  pokemon_name: string;
-  card_number: string;
-  extension: string;
-  rarity: string;
-  category: 'SINGLE' | 'SEALED';
-  location: 'CELIAN' | 'LOUIS';
-  grading?: {
-    is_graded: boolean;
-    company: string;
-    note: number;
-  };
+export interface Consumable {
+  $id: string;
+  name: string;
+  price: number;    // Prix unitaire
+  quantity: number; // Quantité achetée
+  category: string;
 }
 
-export const POKEMON_RARITIES = [
-  "Commune", "Rare Holo", "EX/GX/V", "VMAX/VSTAR", "SAR", "Secret Gold"
-];
+export interface InvestorStats {
+  louis_owed_pokemon: number;
+  celian_owed_pokemon: number;
+  initial_capital: number; // Ton apport de départ (ex: 200€)
+}

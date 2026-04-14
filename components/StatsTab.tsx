@@ -50,9 +50,16 @@ function prevPeriodStart(p: Period): Date | null {
   return d
 }
 
+// Revenu réel : revenue_generated pour les lots, actual_sale_price pour les cartes
+function saleRevenue(item: InventoryItem): number {
+  return item.is_lot ? (item.revenue_generated ?? 0) : (item.actual_sale_price ?? 0)
+}
+
 function filterSold(items: InventoryItem[], from: Date | null, to: Date | null = null): InventoryItem[] {
   return items.filter((i) => {
-    if (i.status !== 'Vendu') return false
+    // Inclure les articles vendus ET les lots partiellement vendus avec revenu
+    const hasRevenue = i.is_lot && i.status !== 'Vendu' && (i.revenue_generated ?? 0) > 0
+    if (i.status !== 'Vendu' && !hasRevenue) return false
     if (from || to) {
       const d = new Date(i.sold_at ?? i.created_at)
       if (from && d < from) return false
@@ -75,8 +82,8 @@ function buildChartData(sold: InventoryItem[], period: Period) {
 
     if (!map[key]) map[key] = { key, ca: 0, profit: 0, count: 0 }
     const cost = item.purchase_price + item.vinted_fees + item.boost_cost
-    map[key].ca      += (item.actual_sale_price ?? 0)
-    map[key].profit  += (item.actual_sale_price ?? 0) - item.sale_fees - cost
+    map[key].ca      += saleRevenue(item)
+    map[key].profit  += saleRevenue(item) - item.sale_fees - cost
     map[key].count   += 1
   })
 
@@ -99,8 +106,8 @@ function buildTop5Extensions(sold: InventoryItem[]) {
     if (!map[ext]) map[ext] = { count: 0, ca: 0, profit: 0 }
     const cost = item.purchase_price + item.vinted_fees + item.boost_cost
     map[ext].count  += 1
-    map[ext].ca     += item.actual_sale_price ?? 0
-    map[ext].profit += (item.actual_sale_price ?? 0) - item.sale_fees - cost
+    map[ext].ca     += saleRevenue(item)
+    map[ext].profit += saleRevenue(item) - item.sale_fees - cost
   })
   return Object.entries(map)
     .map(([ext, d]) => ({ ext, ...d, avgProfit: d.count > 0 ? d.profit / d.count : 0 }))
@@ -115,7 +122,7 @@ function buildTypeData(sold: InventoryItem[]) {
   let profitScelles = 0
   sold.forEach((item) => {
     const cost = item.purchase_price + item.vinted_fees + item.boost_cost
-    const profit = (item.actual_sale_price ?? 0) - item.sale_fees - cost
+    const profit = saleRevenue(item) - item.sale_fees - cost
     if (item.pokemon_category === 'SEALED') { scelles++; profitScelles += profit }
     else { cartes++; profitCartes += profit }
   })
@@ -185,8 +192,8 @@ export default function StatsTab({ items, consumablesTotal }: StatsTabProps) {
   const prevSold    = useMemo(() => filterSold(items, prevStart, currentStart ?? undefined), [items, prevStart, currentStart])
 
   // ── KPIs ──
-  const ca      = currentSold.reduce((s, i) => s + (i.actual_sale_price ?? 0), 0)
-  const prevCa  = prevSold.reduce((s, i) => s + (i.actual_sale_price ?? 0), 0)
+  const ca      = currentSold.reduce((s, i) => s + saleRevenue(i), 0)
+  const prevCa  = prevSold.reduce((s, i) => s + saleRevenue(i), 0)
   const caEvol  = prevCa > 0 ? ((ca - prevCa) / prevCa) * 100 : null
 
   const totalCost     = currentSold.reduce((s, i) => s + i.purchase_price + i.vinted_fees + i.boost_cost, 0)
@@ -198,7 +205,7 @@ export default function StatsTab({ items, consumablesTotal }: StatsTabProps) {
 
   const prevNet    = prevSold.reduce((s, i) => {
     const cost = i.purchase_price + i.vinted_fees + i.boost_cost
-    return s + (i.actual_sale_price ?? 0) - i.sale_fees - cost
+    return s + saleRevenue(i) - i.sale_fees - cost
   }, 0)
   const profitEvol = prevNet !== 0 ? ((netProfit - prevNet) / Math.abs(prevNet)) * 100 : null
 

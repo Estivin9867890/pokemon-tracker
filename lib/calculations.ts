@@ -32,7 +32,15 @@ export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPIT
   const sold  = realItems.filter((i) => i.status === 'Vendu')
   const stock = realItems.filter((i) => i.status === 'En Attente' || i.status === 'En Stock' || i.status === 'Sur Vinted' || i.status === 'Partiellement vendu')
 
-  const stockValue = stock.reduce((s, i) => s + i.purchase_price, 0)
+  // Lots partiellement vendus avec revenue : coût déjà engagé, on le sort du stockValue
+  const partialLotsActive = realItems.filter(i =>
+    i.is_lot && i.status !== 'Vendu' && (i.revenue_generated ?? 0) > 0
+  )
+  const partialLotsIds = new Set(partialLotsActive.map(i => i.id))
+
+  const stockValue = stock
+    .filter(i => !partialLotsIds.has(i.id))
+    .reduce((s, i) => s + i.purchase_price, 0)
 
   // Consommables
   const consumablesTotal = consumables.reduce((s, c) => s + c.price * (c.quantity ?? 1), 0)
@@ -59,9 +67,11 @@ export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPIT
       const cost = i.purchase_price + i.vinted_fees + i.boost_cost
       return s + (i.revenue_generated ?? 0) - i.sale_fees - cost
     }, 0)
-    // 3. Lots partiellement vendus : revenu reçu seulement (coût encore dans stockValue)
-    + realItems.filter(i => i.is_lot && i.status !== 'Vendu' && (i.revenue_generated ?? 0) > 0)
-      .reduce((s, i) => s + (i.revenue_generated ?? 0) - i.sale_fees, 0)
+    // 3. Lots partiellement vendus : revenu - coût TOTAL (coût retiré du stockValue)
+    + partialLotsActive.reduce((s, i) => {
+      const cost = i.purchase_price + i.vinted_fees + i.boost_cost
+      return s + (i.revenue_generated ?? 0) - i.sale_fees - cost
+    }, 0)
 
   const cashInHand     = initialCapital + netProfit - stockValue - consumablesTotal - owedRomain - owedCelian
   const currentCapital = cashInHand + stockValue
@@ -77,6 +87,10 @@ export function calcStats(items: InventoryItem[], initialCapital = INITIAL_CAPIT
       return ((i.actual_sale_price! - i.sale_fees - cost) / i.purchase_price) * 100
     }),
     ...sold.filter(i => i.is_lot && i.purchase_price > 0 && (i.revenue_generated ?? 0) > 0).map(i => {
+      const cost = i.purchase_price + i.vinted_fees + i.boost_cost
+      return ((i.revenue_generated! - i.sale_fees - cost) / i.purchase_price) * 100
+    }),
+    ...partialLotsActive.filter(i => i.purchase_price > 0 && (i.revenue_generated ?? 0) > 0).map(i => {
       const cost = i.purchase_price + i.vinted_fees + i.boost_cost
       return ((i.revenue_generated! - i.sale_fees - cost) / i.purchase_price) * 100
     }),

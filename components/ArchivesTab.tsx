@@ -55,8 +55,15 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
     .filter((i) => i.is_hit && i.status === 'Vendu' && i.actual_sale_price == null)
     .sort((a, b) => new Date(b.sold_at ?? b.created_at).getTime() - new Date(a.sold_at ?? a.created_at).getTime())
 
-  // Liste unifiée triée par date
-  const allEntries = [...soldItems, ...soldHits]
+  // ── Totaux : même logique que calcStats (pas de double comptage) ──
+  // Source unique : revenue_generated pour les lots (= Σ actual_sale_price des hits)
+  // → ne jamais additionner les prix des hits séparément
+  const soldSingles  = items.filter(i => i.status === 'Vendu' && !i.is_hit && !i.is_lot)
+  const soldLots     = items.filter(i => i.status === 'Vendu' && i.is_lot)
+  const partialLots  = items.filter(i => i.is_lot && i.status !== 'Vendu' && (i.revenue_generated ?? 0) > 0)
+
+  // Liste unifiée triée par date (inclut les lots partiellement vendus avec revenue)
+  const allEntries = [...soldItems, ...soldHits, ...partialLots]
     .sort((a, b) => new Date(b.sold_at ?? b.created_at).getTime() - new Date(a.sold_at ?? a.created_at).getTime())
 
   async function handlePatch(item: InventoryItem) {
@@ -69,13 +76,6 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
 
   if (allEntries.length === 0 && orphanHits.length === 0) return <EmptyArchives />
 
-  // ── Totaux : même logique que calcStats (pas de double comptage) ──
-  // Source unique : revenue_generated pour les lots (= Σ actual_sale_price des hits)
-  // → ne jamais additionner les prix des hits séparément
-  const soldSingles  = items.filter(i => i.status === 'Vendu' && !i.is_hit && !i.is_lot)
-  const soldLots     = items.filter(i => i.status === 'Vendu' && i.is_lot)
-  const partialLots  = items.filter(i => i.is_lot && i.status !== 'Vendu' && (i.revenue_generated ?? 0) > 0)
-
   const totalRevenue =
     soldSingles.reduce((s, i) => s + (i.actual_sale_price ?? 0), 0) +
     soldLots.reduce((s, i) => s + (i.revenue_generated ?? 0), 0) +
@@ -83,7 +83,8 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
 
   const totalCost =
     soldSingles.reduce((s, i) => s + i.purchase_price + i.vinted_fees + i.boost_cost, 0) +
-    soldLots.reduce((s, i) => s + i.purchase_price + i.vinted_fees + i.boost_cost, 0)
+    soldLots.reduce((s, i) => s + i.purchase_price + i.vinted_fees + i.boost_cost, 0) +
+    partialLots.reduce((s, i) => s + i.purchase_price + i.vinted_fees + i.boost_cost, 0)
 
   const totalFees =
     soldSingles.reduce((s, i) => s + i.sale_fees, 0) +
