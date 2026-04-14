@@ -50,6 +50,31 @@ export default function StockTab({ items, roiTarget, onSell, onEdit, onDelete, o
   )
 
   const q = search.trim().toLowerCase()
+
+  // IDs des lots qui remontent uniquement grâce à un hit → auto-dépliés
+  const lotsMatchedByHit = new Set(
+    q ? stockItems
+      .filter((i) => i.is_lot)
+      .filter((i) => {
+        const selfMatch =
+          i.item_name?.toLowerCase().includes(q) ||
+          i.pokemon_name?.toLowerCase().includes(q) ||
+          i.card_number?.toLowerCase().includes(q) ||
+          i.rarity?.toLowerCase().includes(q) ||
+          i.extension?.toLowerCase().includes(q)
+        if (selfMatch) return false
+        return (hitsByLotId[i.id] ?? []).some((h) =>
+          h.item_name?.toLowerCase().includes(q) ||
+          h.pokemon_name?.toLowerCase().includes(q) ||
+          h.card_number?.toLowerCase().includes(q) ||
+          h.rarity?.toLowerCase().includes(q) ||
+          h.extension?.toLowerCase().includes(q)
+        )
+      })
+      .map((i) => i.id)
+    : []
+  )
+
   const filteredItems = stockItems
     .filter((i) => {
       if (filter === 'lots') return i.is_lot
@@ -58,15 +83,25 @@ export default function StockTab({ items, roiTarget, onSell, onEdit, onDelete, o
     })
     .filter((i) => {
       if (!q) return true
-      // La recherche ne porte que sur les cartes à l'unité et les hits (pas les lots)
-      if (i.is_lot) return false
-      return (
+      const matchesSelf =
         i.item_name?.toLowerCase().includes(q) ||
         i.pokemon_name?.toLowerCase().includes(q) ||
         i.card_number?.toLowerCase().includes(q) ||
         i.rarity?.toLowerCase().includes(q) ||
         i.extension?.toLowerCase().includes(q)
-      )
+      if (matchesSelf) return true
+      // Pour les lots : chercher aussi dans les hits à l'intérieur
+      if (i.is_lot) {
+        const hits = hitsByLotId[i.id] ?? []
+        return hits.some((h) =>
+          h.item_name?.toLowerCase().includes(q) ||
+          h.pokemon_name?.toLowerCase().includes(q) ||
+          h.card_number?.toLowerCase().includes(q) ||
+          h.rarity?.toLowerCase().includes(q) ||
+          h.extension?.toLowerCase().includes(q)
+        )
+      }
+      return false
     })
 
   const lotsCount   = stockItems.filter((i) => i.is_lot).length
@@ -154,7 +189,7 @@ export default function StockTab({ items, roiTarget, onSell, onEdit, onDelete, o
                   const lotCost     = item.lot_total_cost ?? item.purchase_price
                   const lotProgress = lotTotal > 0 ? lotSold / lotTotal : 0
                   const lotProfit   = lotRevenue - lotCost
-                  const isExpanded  = expandedLotId === item.lot_id
+                  const isExpanded  = expandedLotId === item.lot_id || lotsMatchedByHit.has(item.id)
 
                   return (
                     <Fragment key={item.id}>
