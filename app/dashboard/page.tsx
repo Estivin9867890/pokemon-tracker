@@ -295,6 +295,7 @@ export default function DashboardPage() {
         onClose={() => setDetailItem(null)}
         item={detailItem}
         roiTarget={settings.roi_target}
+        hits={detailItem?.is_lot ? items.filter((i) => i.is_hit && i.parent_lot_id === detailItem.lot_id) : []}
       />
       <AddEditModal
         open={addEditOpen}

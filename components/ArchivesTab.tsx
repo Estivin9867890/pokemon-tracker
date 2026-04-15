@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import { InventoryItem } from '@/types'
 import { calcItem, formatCurrency, formatROI, roiColor } from '@/lib/calculations'
-import { Pencil, Trash2, Archive, StickyNote, TrendingUp, TrendingDown, AlertCircle, Check, Loader2, Sparkles, Search, X } from 'lucide-react'
+import { Pencil, Trash2, Archive, StickyNote, TrendingUp, TrendingDown, AlertCircle, Check, Loader2, Sparkles, Search, X, ChevronDown, ChevronRight } from 'lucide-react'
 
 interface ArchivesTabProps {
   items: InventoryItem[]
@@ -31,13 +31,23 @@ function formatDate(dateStr: string) {
 }
 
 export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDetail, onPatchSalePrice }: ArchivesTabProps) {
-  const [patchPrices, setPatchPrices] = useState<Record<string, string>>({})
-  const [patching, setPatching]       = useState<Record<string, boolean>>({})
-  const [search, setSearch]           = useState('')
+  const [patchPrices, setPatchPrices]   = useState<Record<string, string>>({})
+  const [patching, setPatching]         = useState<Record<string, boolean>>({})
+  const [search, setSearch]             = useState('')
+  const [expandedLotId, setExpandedLotId] = useState<string | null>(null)
 
-  // Index parent lots by lot_id pour afficher le nom du lot sur les hits
+  // Index parent lots by lot_id
   const lotByLotId = items.reduce<Record<string, InventoryItem>>((acc, i) => {
     if (i.is_lot && i.lot_id) acc[i.lot_id] = i
+    return acc
+  }, {})
+
+  // Tous les hits (vendu ou non) indexés par parent_lot_id — pour accordéons + recherche
+  const hitsByLotId = items.reduce<Record<string, InventoryItem[]>>((acc, h) => {
+    if (h.is_hit && h.parent_lot_id) {
+      if (!acc[h.parent_lot_id]) acc[h.parent_lot_id] = []
+      acc[h.parent_lot_id].push(h)
+    }
     return acc
   }, {})
 
@@ -46,10 +56,8 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
     .filter((i) => i.status === 'Vendu' && !i.is_hit)
     .sort((a, b) => new Date(b.sold_at ?? b.created_at).getTime() - new Date(a.sold_at ?? a.created_at).getTime())
 
-  // Hits avec prix de vente → lignes de vente individuelles
-  const soldHits = items
-    .filter((i) => i.is_hit && i.actual_sale_price != null)
-    .sort((a, b) => new Date(b.sold_at ?? b.created_at).getTime() - new Date(a.sold_at ?? a.created_at).getTime())
+  // Hits vendus (pour KPI uniquement, non affichés en ligne séparée)
+  const soldHits = items.filter((i) => i.is_hit && i.actual_sale_price != null)
 
   // Hits marqués vendus SANS prix → alerte récupération
   const orphanHits = items
@@ -57,26 +65,16 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
     .sort((a, b) => new Date(b.sold_at ?? b.created_at).getTime() - new Date(a.sold_at ?? a.created_at).getTime())
 
   // ── Totaux : même logique que calcStats (pas de double comptage) ──
-  // Source unique : revenue_generated pour les lots (= Σ actual_sale_price des hits)
-  // → ne jamais additionner les prix des hits séparément
   const soldSingles  = items.filter(i => i.status === 'Vendu' && !i.is_hit && !i.is_lot)
   const soldLots     = items.filter(i => i.status === 'Vendu' && i.is_lot)
   const partialLots  = items.filter(i => i.is_lot && i.status !== 'Vendu' && (i.revenue_generated ?? 0) > 0)
 
-  // Index des hits vendus par parent_lot_id (pour la deep search)
-  const soldHitsByParent = soldHits.reduce<Record<string, InventoryItem[]>>((acc, h) => {
-    if (h.parent_lot_id) {
-      if (!acc[h.parent_lot_id]) acc[h.parent_lot_id] = []
-      acc[h.parent_lot_id].push(h)
-    }
-    return acc
-  }, {})
-
-  // Liste unifiée triée par date (inclut les lots partiellement vendus avec revenue)
-  const allEntries = [...soldItems, ...soldHits, ...partialLots]
+  // Liste unifiée : lots + singles uniquement — les hits sont dans les accordéons
+  const allEntries = [...soldItems, ...partialLots]
     .sort((a, b) => new Date(b.sold_at ?? b.created_at).getTime() - new Date(a.sold_at ?? a.created_at).getTime())
 
   // Filtrage par recherche — KPIs non affectés, uniquement la liste
+  // Recherche récursive : si un hit correspond → son lot parent remonte
   const q = search.trim().toLowerCase()
   const matchesItem = (i: InventoryItem) =>
     i.item_name?.toLowerCase().includes(q) ||
@@ -88,9 +86,8 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
   const visibleEntries = q
     ? allEntries.filter((i) => {
         if (matchesItem(i)) return true
-        // Lots : chercher dans les hits vendus à l'intérieur
         if (i.is_lot) {
-          return (soldHitsByParent[i.lot_id ?? ''] ?? []).some(matchesItem)
+          return (hitsByLotId[i.lot_id ?? ''] ?? []).some(matchesItem)
         }
         return false
       })
@@ -245,52 +242,59 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
                 </thead>
                 <tbody className="divide-y divide-zinc-800/40">
                   {visibleEntries.map((item) => {
-                    const isHit       = item.is_hit
-                    const parentLot   = isHit && item.parent_lot_id ? lotByLotId[item.parent_lot_id] : null
                     const salePrice   = item.is_lot ? (item.revenue_generated ?? null) : item.actual_sale_price
-                    // Hits : coût = prix d'achat estimé ; lots/singles : coût réel
-                    const costBasis   = isHit
-                      ? (item.expected_sale_price ?? 0)
-                      : item.purchase_price + item.vinted_fees + item.boost_cost
+                    const costBasis   = item.purchase_price + item.vinted_fees + item.boost_cost
                     const marginNet   = salePrice != null ? salePrice - item.sale_fees - costBasis : null
                     const roiVal      = marginNet != null && costBasis > 0
                       ? parseFloat(((marginNet / costBasis) * 100).toFixed(1))
-                      : !isHit && item.purchase_price > 0 && marginNet != null
-                        ? parseFloat(((marginNet / item.purchase_price) * 100).toFixed(1))
-                        : null
+                      : null
                     const meetsTarget = (roiVal ?? 0) >= roiTarget
                     const isProfit    = (marginNet ?? 0) >= 0
 
+                    // Hits de ce lot (tous statuts confondus)
+                    const lotHits    = item.is_lot ? (hitsByLotId[item.lot_id ?? ''] ?? []) : []
+                    const isExpanded = expandedLotId === item.lot_id || (
+                      // Auto-dépliage si la recherche a matché via un hit
+                      q ? (hitsByLotId[item.lot_id ?? ''] ?? []).some(matchesItem) && !matchesItem(item) : false
+                    )
+
                     return (
+                      <Fragment key={item.id}>
                       <tr
-                        key={item.id}
-                        onClick={() => !isHit && onDetail(item)}
-                        className={`hover:bg-zinc-800/30 transition-colors group ${!isHit ? 'cursor-pointer' : ''} ${isHit ? 'bg-amber-500/[0.02]' : ''}`}
+                        onClick={() => onDetail(item)}
+                        className="cursor-pointer hover:bg-zinc-800/30 transition-colors group"
                       >
                         {/* Article */}
                         <td className="px-5 py-3.5">
                           <div className="flex items-center gap-2">
-                            {isHit ? (
-                              <Sparkles size={10} className="text-amber-400 shrink-0" />
-                            ) : (
-                              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${meetsTarget ? 'bg-emerald-400' : isProfit ? 'bg-amber-400' : 'bg-red-400'}`} />
-                            )}
+                            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${meetsTarget ? 'bg-emerald-400' : isProfit ? 'bg-amber-400' : 'bg-red-400'}`} />
                             <div>
                               <p className="font-medium text-white text-sm">{item.item_name}</p>
-                              {isHit && parentLot && (
-                                <p className="text-[10px] text-zinc-600 mt-0.5">Lot : {parentLot.item_name}</p>
-                              )}
-                              {!isHit && item.extension && (
+                              {item.extension && (
                                 <p className="text-[10px] text-zinc-600 mt-0.5">{item.extension}</p>
                               )}
-                              {!isHit && item.is_lot && item.items_sold != null && (
-                                <p className="text-[10px] text-zinc-600 mt-0.5">{item.items_sold}/{item.item_count} cartes</p>
+                              {item.is_lot && item.items_sold != null && (
+                                <p className="text-[10px] text-zinc-600 mt-0.5">{item.items_sold}/{item.item_count} cartes vendues</p>
                               )}
                               {item.notes && (
                                 <div className="flex items-center gap-1 mt-0.5">
                                   <StickyNote size={9} className="text-zinc-700" />
                                   <span className="text-[10px] text-zinc-600 truncate max-w-[160px]">{item.notes}</span>
                                 </div>
+                              )}
+                              {/* Bouton expand hits pour les lots */}
+                              {item.is_lot && lotHits.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setExpandedLotId(isExpanded ? null : (item.lot_id ?? null)) }}
+                                  className="flex items-center gap-1 mt-1.5 text-[10px] text-amber-400 hover:text-amber-300 transition-colors"
+                                >
+                                  {isExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                                  {isExpanded
+                                    ? 'Masquer les cartes'
+                                    : `Voir ${lotHits.length} carte${lotHits.length > 1 ? 's' : ''} (${lotHits.filter(h => h.is_sold || h.actual_sale_price != null).length} vendues)`
+                                  }
+                                </button>
                               )}
                             </div>
                           </div>
@@ -309,11 +313,7 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
 
                         {/* Coût */}
                         <td className="px-4 py-3.5 text-right">
-                          {isHit ? (
-                            <span className="text-[10px] text-zinc-600">—</span>
-                          ) : (
-                            <p className="text-zinc-300 font-medium">{formatCurrency(costBasis)}</p>
-                          )}
+                          <p className="text-zinc-300 font-medium">{formatCurrency(costBasis)}</p>
                         </td>
 
                         {/* Vendu */}
@@ -344,8 +344,6 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
                         <td className="px-4 py-3.5 text-right">
                           {roiVal != null ? (
                             <span className={`font-bold text-sm ${roiColor(roiVal, roiTarget)}`}>{formatROI(roiVal)}</span>
-                          ) : isHit ? (
-                            <span className="text-[10px] text-amber-400/60">hit</span>
                           ) : <span className="text-zinc-700">—</span>}
                         </td>
 
@@ -359,24 +357,70 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
                         {/* Actions */}
                         <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                            {!isHit && (
-                              <button
-                                onClick={() => onEdit(item)}
-                                className="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-600 hover:text-white hover:bg-zinc-800 transition-colors"
-                              >
-                                <Pencil size={12} />
-                              </button>
-                            )}
+                            <button
+                              onClick={() => onEdit(item)}
+                              className="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-600 hover:text-white hover:bg-zinc-800 transition-colors"
+                            >
+                              <Pencil size={12} />
+                            </button>
                             <button
                               onClick={() => onDelete(item)}
                               className="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-400/10 transition-colors"
-                              title={isHit ? 'Supprimer ce hit' : 'Supprimer'}
                             >
                               <Trash2 size={12} />
                             </button>
                           </div>
                         </td>
                       </tr>
+
+                      {/* ── Accordéon hits — visible pour tous les lots ── */}
+                      {item.is_lot && isExpanded && lotHits.length > 0 && (
+                        <tr className="border-t border-amber-500/10">
+                          <td colSpan={9} className="px-5 py-2 bg-amber-500/[0.02]">
+                            <div className="max-h-80 overflow-y-auto pr-1 divide-y divide-zinc-800/30">
+                              {lotHits.map((hit) => {
+                                const hitSold = hit.is_sold || hit.actual_sale_price != null
+                                return (
+                                  <div key={hit.id} className={`flex items-center justify-between gap-4 py-2 ${hitSold ? '' : 'opacity-50'}`}>
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      {hitSold ? (
+                                        <Check size={10} className="text-emerald-400 shrink-0" />
+                                      ) : (
+                                        <div className="w-2 h-2 rounded-full bg-zinc-700 shrink-0" />
+                                      )}
+                                      <p className={`text-xs font-medium truncate ${hitSold ? 'text-emerald-300' : 'text-zinc-400'}`}>
+                                        {hit.pokemon_name ?? hit.item_name}
+                                      </p>
+                                      {hit.card_number && (
+                                        <span className="text-[10px] text-zinc-600 shrink-0">#{hit.card_number}</span>
+                                      )}
+                                      {hit.rarity && (
+                                        <span className="text-[10px] text-zinc-700 shrink-0">{hit.rarity}</span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-4 shrink-0">
+                                      {hit.expected_sale_price != null && (
+                                        <p className="text-[10px] text-zinc-600">
+                                          coût <span className="text-zinc-500">{formatCurrency(hit.expected_sale_price)}</span>
+                                        </p>
+                                      )}
+                                      {hitSold ? (
+                                        <p className="text-xs font-semibold text-emerald-400">
+                                          {formatCurrency(hit.actual_sale_price ?? hit.sold_price ?? 0)}
+                                          <span className="text-[10px] text-emerald-600 ml-1">vendu</span>
+                                        </p>
+                                      ) : (
+                                        <span className="text-[10px] text-zinc-600">non vendu</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     )
                   })}
                 </tbody>

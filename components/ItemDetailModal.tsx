@@ -5,7 +5,7 @@ import { InventoryItem } from '@/types'
 import { calcItem, formatCurrency, formatROI, roiColor } from '@/lib/calculations'
 import {
   MapPin, Tag, Clock, Package, TrendingUp, TrendingDown,
-  CalendarDays, StickyNote, Zap, Sparkles, Layers,
+  CalendarDays, StickyNote, Zap, Sparkles, Layers, Check,
 } from 'lucide-react'
 
 interface ItemDetailModalProps {
@@ -13,6 +13,7 @@ interface ItemDetailModalProps {
   onClose: () => void
   item: InventoryItem | null
   roiTarget: number
+  hits?: InventoryItem[]
 }
 
 function formatDate(dateStr: string | null) {
@@ -50,7 +51,7 @@ const STATUS_STYLE: Record<string, string> = {
   'Partiellement vendu': 'bg-violet-400/10 text-violet-400 border-violet-400/20',
 }
 
-export default function ItemDetailModal({ open, onClose, item, roiTarget }: ItemDetailModalProps) {
+export default function ItemDetailModal({ open, onClose, item, roiTarget, hits = [] }: ItemDetailModalProps) {
   if (!item) return null
   const calc    = calcItem(item)
   const isSold  = item.status === 'Vendu'
@@ -166,6 +167,48 @@ export default function ItemDetailModal({ open, onClose, item, roiTarget }: Item
               </Row>
             )}
           </Section>
+        )}
+
+        {/* Hits du lot — toujours visible si des hits existent */}
+        {item.is_lot && hits.length > 0 && (
+          <div className="mb-4">
+            <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-1">
+              Cartes du lot ({hits.filter(h => h.is_sold || h.actual_sale_price != null).length}/{hits.length} vendues)
+            </p>
+            <div className="bg-zinc-900/60 border border-zinc-800/60 rounded-xl px-4 py-2 max-h-56 overflow-y-auto divide-y divide-zinc-800/40">
+              {hits.map((hit) => {
+                const hitSold = hit.is_sold || hit.actual_sale_price != null
+                return (
+                  <div key={hit.id} className={`flex items-center justify-between gap-3 py-2 ${hitSold ? '' : 'opacity-50'}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      {hitSold ? (
+                        <Check size={10} className="text-emerald-400 shrink-0" />
+                      ) : (
+                        <Sparkles size={9} className="text-zinc-600 shrink-0" />
+                      )}
+                      <p className={`text-xs font-medium truncate ${hitSold ? 'text-emerald-300' : 'text-zinc-400'}`}>
+                        {hit.pokemon_name ?? hit.item_name}
+                      </p>
+                      {hit.card_number && (
+                        <span className="text-[10px] text-zinc-600 shrink-0">#{hit.card_number}</span>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0">
+                      {hitSold ? (
+                        <p className="text-xs font-semibold text-emerald-400">
+                          {formatCurrency(hit.actual_sale_price ?? hit.sold_price ?? 0)}
+                        </p>
+                      ) : hit.expected_sale_price != null ? (
+                        <p className="text-[10px] text-zinc-500">{formatCurrency(hit.expected_sale_price)}</p>
+                      ) : (
+                        <span className="text-[10px] text-zinc-700">—</span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
         )}
 
         {/* Vente estimée (si non vendu) */}
