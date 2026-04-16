@@ -273,7 +273,7 @@ export default function DashboardPage() {
                   onPatchSalePrice={handlePatchSalePrice}
                 />
               )}
-              {activeTab === 'stats'      && <StatsTab items={items} consumablesTotal={stats.consumablesTotal} />}
+              {activeTab === 'stats'      && <StatsTab items={items} consumablesTotal={stats.consumablesTotal} stats={stats} />}
               {activeTab === 'objectifs'  && <ObjectifsTab stats={stats} settings={settings} />}
               {activeTab === 'tresorerie' && <TresorerieTab stats={stats} />}
               {activeTab === 'logistique' && (

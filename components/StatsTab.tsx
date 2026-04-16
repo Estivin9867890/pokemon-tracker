@@ -5,11 +5,11 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie,
 } from 'recharts'
-import { InventoryItem } from '@/types'
+import { InventoryItem, DashboardStats } from '@/types'
 import { formatCurrency } from '@/lib/calculations'
 import {
   TrendingUp, TrendingDown, ShoppingBag, Clock,
-  Zap, BarChart2, Minus, Award, Package,
+  Zap, BarChart2, Minus, Award, Package, FileDown, Loader2,
 } from 'lucide-react'
 
 type Period = '7j' | '1m' | '3m' | '6m' | '1an' | 'all'
@@ -17,6 +17,7 @@ type Period = '7j' | '1m' | '3m' | '6m' | '1an' | 'all'
 interface StatsTabProps {
   items: InventoryItem[]
   consumablesTotal: number
+  stats: DashboardStats
 }
 
 const PERIODS: { key: Period; label: string }[] = [
@@ -204,8 +205,22 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
   )
 }
 
-export default function StatsTab({ items, consumablesTotal }: StatsTabProps) {
+export default function StatsTab({ items, consumablesTotal, stats }: StatsTabProps) {
   const [period, setPeriod] = useState<Period>('1m')
+  const [exporting, setExporting] = useState(false)
+
+  async function handleExport() {
+    if (exporting) return
+    setExporting(true)
+    try {
+      const { exportToExcel } = await import('@/lib/exportExcel')
+      await exportToExcel(items, stats, consumablesTotal)
+    } catch (e) {
+      console.error('Export échoué :', e)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const currentStart = useMemo(() => periodStart(period), [period])
   const prevStart    = useMemo(() => prevPeriodStart(period), [period])
@@ -246,21 +261,36 @@ export default function StatsTab({ items, consumablesTotal }: StatsTabProps) {
 
   return (
     <div className="space-y-6">
-      {/* ── Sélecteur de période ── */}
-      <div className="flex items-center gap-1 bg-zinc-900/60 border border-zinc-800/60 rounded-2xl p-1 w-fit">
-        {PERIODS.map((p) => (
-          <button
-            key={p.key}
-            onClick={() => setPeriod(p.key)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-              period === p.key
-                ? 'bg-emerald-500 text-black shadow'
-                : 'text-zinc-500 hover:text-zinc-300'
-            }`}
-          >
-            {p.label}
-          </button>
-        ))}
+      {/* ── Barre d'outils : période + export ── */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-1 bg-zinc-900/60 border border-zinc-800/60 rounded-2xl p-1 w-fit">
+          {PERIODS.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => setPeriod(p.key)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                period === p.key
+                  ? 'bg-emerald-500 text-black shadow'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all border border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 hover:border-violet-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {exporting ? (
+            <Loader2 size={13} className="animate-spin" />
+          ) : (
+            <FileDown size={13} />
+          )}
+          {exporting ? 'Génération…' : 'Générer Bilan Complet'}
+        </button>
       </div>
 
       {/* ── KPI Cards ── */}
