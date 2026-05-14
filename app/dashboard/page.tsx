@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { Consumable, InventoryItem, ItemFormData, AppSettings, DEFAULT_SETTINGS } from '@/types'
 import { calcStats } from '@/lib/calculations'
-import { listItems, addItem, addLot, editItem, editLot, markSold, markReceived, markHitSold, patchSalePrice, removeItem, toggleVinted, listConsumables, addConsumable, editConsumable, removeConsumable, sellLotPartial } from '@/lib/db'
+import { listItems, addItem, addLot, editItem, editLot, markSold, markReceived, markHitSold, patchSalePrice, removeItem, toggleVinted, listConsumables, addConsumable, editConsumable, removeConsumable, sellLotPartial, archiveCompletedLots } from '@/lib/db'
 import { getSettings, saveSettings } from '@/lib/settings'
 import StatsBar from '@/components/StatsBar'
 import LotTracker from '@/components/LotTracker'
@@ -13,6 +13,7 @@ import ObjectifsTab from '@/components/ObjectifsTab'
 import TresorerieTab from '@/components/TresorerieTab'
 import LogistiqueTab from '@/components/LogistiqueTab'
 import StatsTab from '@/components/StatsTab'
+import CalendarTab from '@/components/CalendarTab'
 import ItemDetailModal from '@/components/ItemDetailModal'
 import AddEditModal from '@/components/AddEditModal'
 import SellModal from '@/components/SellModal'
@@ -20,10 +21,10 @@ import LotSellModal from '@/components/LotSellModal'
 import DeleteModal from '@/components/DeleteModal'
 import SettingsModal from '@/components/SettingsModal'
 import LogistiqueModal from '@/components/LogistiqueModal'
-import { Plus, Package, Archive, Loader2, Target, PieChart, Settings, BarChart2, Layers, PackageOpen, Truck } from 'lucide-react'
+import { Plus, Package, Archive, Loader2, Target, PieChart, Settings, BarChart2, Layers, PackageOpen, Truck, CalendarDays } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
-type Tab = 'stock' | 'archives' | 'stats' | 'objectifs' | 'tresorerie' | 'logistique'
+type Tab = 'stock' | 'archives' | 'stats' | 'objectifs' | 'tresorerie' | 'logistique' | 'calendrier'
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -158,6 +159,13 @@ export default function DashboardPage() {
     setConsumables((prev) => prev.filter((c) => c.id !== id))
   }
 
+  async function handleCleanupLots() {
+    const archived = await archiveCompletedLots()
+    if (archived.length > 0) {
+      setItems((prev) => prev.map((i) => archived.find((a) => a.id === i.id) ?? i))
+    }
+  }
+
   function openEdit(item: InventoryItem) {
     setEditItemState(item)
     setAddEditOpen(true)
@@ -248,7 +256,8 @@ export default function DashboardPage() {
                 <TabButton active={activeTab === 'stats'}       onClick={() => setActiveTab('stats')}       icon={BarChart2} label="Statistiques" />
                 <TabButton active={activeTab === 'objectifs'}   onClick={() => setActiveTab('objectifs')}   icon={Target}   label="Objectifs" />
                 <TabButton active={activeTab === 'tresorerie'}  onClick={() => setActiveTab('tresorerie')}  icon={PieChart} label="Trésorerie" />
-                <TabButton active={activeTab === 'logistique'}  onClick={() => setActiveTab('logistique')}  icon={Truck}    label="Logistique" count={consumables.length || undefined} />
+                <TabButton active={activeTab === 'logistique'}  onClick={() => setActiveTab('logistique')}  icon={Truck}       label="Logistique"   count={consumables.length || undefined} />
+                <TabButton active={activeTab === 'calendrier'} onClick={() => setActiveTab('calendrier')} icon={CalendarDays} label="Calendrier" />
               </div>
 
               {activeTab === 'stock' && (
@@ -261,6 +270,7 @@ export default function DashboardPage() {
                   onToggleVinted={handleToggleVinted}
                   onMarkReceived={handleMarkReceived}
                   onDetail={(item) => setDetailItem(item)}
+                  onCleanupLots={handleCleanupLots}
                 />
               )}
               {activeTab === 'archives' && (
@@ -283,6 +293,9 @@ export default function DashboardPage() {
                   onEdit={handleEditConsumable}
                   onDelete={handleDeleteConsumable}
                 />
+              )}
+              {activeTab === 'calendrier' && (
+                <CalendarTab items={items} />
               )}
             </div>
           </>

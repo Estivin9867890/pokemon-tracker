@@ -3,7 +3,7 @@
 import { useState, Fragment } from 'react'
 import { InventoryItem } from '@/types'
 import { calcItem, formatCurrency, formatROI, roiColor } from '@/lib/calculations'
-import { Pencil, Trash2, ShoppingCart, StickyNote, Package, Tag, X, PackageCheck, Clock, ChevronDown, ChevronRight, Sparkles, Search, Layers } from 'lucide-react'
+import { Pencil, Trash2, ShoppingCart, StickyNote, Package, Tag, X, PackageCheck, Clock, ChevronDown, ChevronRight, Sparkles, Search, Layers, Wrench } from 'lucide-react'
 
 type StockFilter = 'all' | 'lots' | 'singles'
 
@@ -16,6 +16,7 @@ interface StockTabProps {
   onToggleVinted: (item: InventoryItem) => void
   onMarkReceived: (item: InventoryItem) => void
   onDetail: (item: InventoryItem) => void
+  onCleanupLots?: () => Promise<void>
 }
 
 function EmptyState() {
@@ -30,10 +31,11 @@ function EmptyState() {
   )
 }
 
-export default function StockTab({ items, roiTarget, onSell, onEdit, onDelete, onToggleVinted, onMarkReceived, onDetail }: StockTabProps) {
-  const [expandedLotId, setExpandedLotId] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<StockFilter>('all')
+export default function StockTab({ items, roiTarget, onSell, onEdit, onDelete, onToggleVinted, onMarkReceived, onDetail, onCleanupLots }: StockTabProps) {
+  const [expandedLotId, setExpandedLotId]   = useState<string | null>(null)
+  const [search, setSearch]                  = useState('')
+  const [filter, setFilter]                  = useState<StockFilter>('all')
+  const [cleaningUp, setCleaningUp]          = useState(false)
 
   const hitsByLotId = items.reduce<Record<string, InventoryItem[]>>((acc, i) => {
     if (i.is_hit && i.parent_lot_id) {
@@ -107,8 +109,41 @@ export default function StockTab({ items, roiTarget, onSell, onEdit, onDelete, o
   const lotsCount   = stockItems.filter((i) => i.is_lot).length
   const singlesCount = stockItems.filter((i) => !i.is_lot).length
 
+  // Lots techniquement terminés mais toujours en stock
+  const completableLots = stockItems.filter((i) =>
+    i.is_lot &&
+    i.item_count != null && i.items_sold != null &&
+    i.items_sold >= i.item_count
+  )
+
+  async function handleCleanup() {
+    if (!onCleanupLots) return
+    setCleaningUp(true)
+    try { await onCleanupLots() } finally { setCleaningUp(false) }
+  }
+
   return (
     <div className="space-y-4">
+
+      {/* Bandeau lots bloqués */}
+      {completableLots.length > 0 && onCleanupLots && (
+        <div className="flex items-center justify-between gap-4 px-4 py-3 bg-amber-500/8 border border-amber-500/25 rounded-2xl">
+          <div className="flex items-center gap-2 min-w-0">
+            <Wrench size={13} className="text-amber-400 shrink-0" />
+            <p className="text-[12px] text-amber-300 font-medium">
+              {completableLots.length} lot{completableLots.length > 1 ? 's' : ''} terminé{completableLots.length > 1 ? 's' : ''} bloqué{completableLots.length > 1 ? 's' : ''} en stock
+            </p>
+          </div>
+          <button
+            onClick={handleCleanup}
+            disabled={cleaningUp}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 text-xs font-semibold hover:bg-amber-500/25 transition-colors disabled:opacity-50"
+          >
+            <Wrench size={11} />
+            {cleaningUp ? 'Nettoyage…' : 'Nettoyer les lots'}
+          </button>
+        </div>
+      )}
 
       {/* Filtres + Recherche */}
       <div className="flex items-center gap-3 flex-wrap">

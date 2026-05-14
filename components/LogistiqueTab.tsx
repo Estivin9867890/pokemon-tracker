@@ -20,7 +20,8 @@ const CAT_LABEL: Record<ConsumableCategory, { label: string; color: string }> = 
 }
 
 export default function LogistiqueTab({ consumables, onAdd, onEdit, onDelete }: LogistiqueTabProps) {
-  const [editTarget, setEditTarget] = useState<Consumable | null>(null)
+  const [editTarget, setEditTarget]         = useState<Consumable | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   const totalAll   = useMemo(() => consumables.reduce((s, c) => s + c.price * c.quantity, 0), [consumables])
   const byCategory = useMemo(() => {
@@ -85,7 +86,37 @@ export default function LogistiqueTab({ consumables, onAdd, onEdit, onDelete }: 
         ) : (
           <div className="divide-y divide-zinc-800/30">
             {consumables.map((c) => {
-              const cat = CAT_LABEL[c.category]
+              const cat       = CAT_LABEL[c.category]
+              const confirming = confirmDeleteId === c.id
+              const amount     = c.price * c.quantity
+
+              if (confirming) {
+                return (
+                  <div key={c.id} className="flex items-center justify-between px-5 py-3 bg-red-500/5 border-l-2 border-red-500/40">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-red-300 truncate">{c.name}</p>
+                      <p className="text-[11px] text-red-400/70 mt-0.5">
+                        Supprimer cette dépense ? <span className="font-bold text-red-400">{formatCurrency(amount)}</span> seront crédités à la trésorerie.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 ml-4 shrink-0">
+                      <button
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 transition-colors"
+                      >
+                        Annuler
+                      </button>
+                      <button
+                        onClick={async () => { await onDelete(c.id); setConfirmDeleteId(null) }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-500/80 hover:bg-red-500 transition-colors"
+                      >
+                        Confirmer
+                      </button>
+                    </div>
+                  </div>
+                )
+              }
+
               return (
                 <div key={c.id} className="flex items-center justify-between px-5 py-3 hover:bg-zinc-800/20 transition-colors group">
                   <div className="min-w-0 flex-1">
@@ -101,7 +132,7 @@ export default function LogistiqueTab({ consumables, onAdd, onEdit, onDelete }: 
                     </p>
                   </div>
                   <div className="flex items-center gap-3 ml-4 shrink-0">
-                    <p className="text-sm font-semibold text-orange-400">{formatCurrency(c.price * c.quantity)}</p>
+                    <p className="text-sm font-semibold text-orange-400">{formatCurrency(amount)}</p>
                     <button
                       onClick={() => setEditTarget(c)}
                       className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-zinc-300 transition-all"
@@ -109,7 +140,7 @@ export default function LogistiqueTab({ consumables, onAdd, onEdit, onDelete }: 
                       <Pencil size={13} />
                     </button>
                     <button
-                      onClick={() => onDelete(c.id)}
+                      onClick={() => setConfirmDeleteId(c.id)}
                       className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-all"
                     >
                       <Trash2 size={13} />

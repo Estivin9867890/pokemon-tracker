@@ -192,6 +192,13 @@ export async function editLot(id: string, data: ItemFormData): Promise<{ updated
   const nbArticles = Math.max(1, parseInt(data.nb_articles) || 1)
   const lotId      = data.lot_id!
 
+  // Vérifier si la réduction de item_count rend le lot complet
+  const { data: current, error: fetchErr } = await supabase
+    .from('inventory').select('items_sold').eq('id', id).single()
+  throwIf(fetchErr, 'editLot (fetch current)')
+  const currentSold    = ((current as Row)?.items_sold as number) ?? 0
+  const isNowFullySold = nbArticles > 0 && currentSold >= nbArticles
+
   // 1. Mettre à jour le parent
   const { data: parentRow, error: parentErr } = await supabase
     .from('inventory')
@@ -205,6 +212,7 @@ export async function editLot(id: string, data: ItemFormData): Promise<{ updated
       location:       data.location,
       funded_by:      data.funded_by ?? null,
       expected_sale_price: data.expected_sale_price ? parseFloat(data.expected_sale_price) : null,
+      ...(isNowFullySold ? { status: 'Vendu', sold_at: new Date().toISOString() } : {}),
     })
     .eq('id', id)
     .select()
@@ -424,4 +432,34 @@ export async function editConsumable(id: string, data: { name: string; price: nu
 export async function removeConsumable(id: string): Promise<void> {
   const { error } = await supabase.from('consumables').delete().eq('id', id)
   throwIf(error, 'removeConsumable')
+}
+
+// Retro-fix : archive tous les lots dont items_sold >= item_count mais non encore archivés
+export async function archiveCompletedLots(): Promise<InventoryItem[]> {
+  const { data, error } = await supabase
+    .from('inventory')
+    .select('*')
+    .eq('is_lot', true)
+    .not('items_sold', 'is', null)
+    .not('item_count', 'is', null)
+  throwIf(error, 'archiveCompletedLots (fetch)')
+
+  const toArchive = (data ?? []).filter((row) =>
+    row.status !== 'Vendu' &&
+    (row.items_sold as number) >= (row.item_count as number)
+  )
+  if (toArchive.length === 0) return []
+
+  const updated: InventoryItem[] = []
+  for (const lot of toArchive) {
+    const { data: updatedRow, error: updErr } = await supabase
+      .from('inventory')
+      .update({ status: 'Vendu', sold_at: new Date().toISOString() })
+      .eq('id', lot.id as string)
+      .select()
+      .single()
+    throwIf(updErr, `archiveCompletedLots (update ${lot.id})`)
+    updated.push(rowToItem(updatedRow as Row))
+  }
+  return updated
 }
