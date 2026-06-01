@@ -66,6 +66,7 @@ export async function listItems(): Promise<InventoryItem[]> {
     .from('inventory')
     .select('*')
     .order('created_at', { ascending: false })
+    .limit(10000)
   throwIf(error, 'listItems')
   return (data ?? []).map(rowToItem)
 }
@@ -444,7 +445,7 @@ export async function archiveCompletedLots(): Promise<InventoryItem[]> {
     .not('item_count', 'is', null)
   throwIf(error, 'archiveCompletedLots (fetch)')
 
-  const toArchive = (data ?? []).filter((row) =>
+  const toArchive = (data ?? []).filter((row: Row) =>
     row.status !== 'Vendu' &&
     (row.items_sold as number) >= (row.item_count as number)
   )
