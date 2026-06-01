@@ -62,13 +62,22 @@ function throwIf(error: unknown, msg: string) {
 // ── Inventory ────────────────────────────────────────────
 
 export async function listItems(): Promise<InventoryItem[]> {
-  const { data, error } = await supabase
-    .from('inventory')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(10000)
-  throwIf(error, 'listItems')
-  return (data ?? []).map(rowToItem)
+  const PAGE = 1000
+  const all: InventoryItem[] = []
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('inventory')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .range(from, from + PAGE - 1)
+    throwIf(error, 'listItems')
+    const page = (data ?? []).map(rowToItem)
+    all.push(...page)
+    if (page.length < PAGE) break
+    from += PAGE
+  }
+  return all
 }
 
 export async function addItem(data: ItemFormData): Promise<InventoryItem> {
