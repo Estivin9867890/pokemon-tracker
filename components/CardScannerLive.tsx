@@ -526,10 +526,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
             />
 
             {/* ── Dashed card frame ──────────────────────────────────── */}
-            <div
-              className="absolute inset-x-0 top-0 flex items-center justify-center pointer-events-none"
-              style={{ bottom: 272 }}
-            >
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="relative" style={{ width: '70%', aspectRatio: '5/7' }}>
                 {/* Dashed border */}
                 <div className={`absolute inset-0 rounded-2xl border-2 border-dashed transition-colors duration-500 ${
@@ -569,9 +566,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
             </div>
 
             {/* ── Zoom controls (right side) ─────────────────────────── */}
-            <div className="absolute right-3 flex flex-col items-center gap-2.5 z-10"
-              style={{ top: '50%', transform: 'translateY(calc(-50% - 136px))' }}
-            >
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col items-center gap-2.5 z-10">
               <button type="button" onClick={() => applyZoom(zoom + ZOOM_STEP)} disabled={zoom >= ZOOM_MAX}
                 className="w-9 h-9 rounded-full bg-black/60 border border-white/18 text-white flex items-center justify-center disabled:opacity-25 backdrop-blur-sm active:scale-95 transition-transform"
               >
@@ -603,10 +598,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
 
             {/* ── Detection badge ────────────────────────────────────── */}
             {flashName && (
-              <div
-                className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500 text-white text-sm font-bold shadow-xl pointer-events-none whitespace-nowrap animate-bounce-once"
-                style={{ bottom: 'calc(272px + 10%)' }}
-              >
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500 text-white text-sm font-bold shadow-xl pointer-events-none whitespace-nowrap">
                 <CheckCircle2 size={14} />
                 {flashName}
               </div>
@@ -621,7 +613,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
 
             {/* ── Ambiguity overlay ──────────────────────────────────── */}
             {candidates.length > 0 && (
-              <div className="absolute inset-x-0 top-0 bg-black/88 flex flex-col z-20 backdrop-blur-sm" style={{ bottom: 272 }}>
+              <div className="absolute inset-0 bg-black/88 flex flex-col z-20 backdrop-blur-sm">
                 <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-white/8 shrink-0">
                   <div>
                     <p className="text-sm font-bold text-white">{candidates.length} cartes trouvées</p>
