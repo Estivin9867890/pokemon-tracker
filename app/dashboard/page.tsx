@@ -16,12 +16,13 @@ import StatsTab from '@/components/StatsTab'
 import CalendarTab from '@/components/CalendarTab'
 import ItemDetailModal from '@/components/ItemDetailModal'
 import AddEditModal from '@/components/AddEditModal'
+import CardScannerLive from '@/components/CardScannerLive'
 import SellModal from '@/components/SellModal'
 import LotSellModal from '@/components/LotSellModal'
 import DeleteModal from '@/components/DeleteModal'
 import SettingsModal from '@/components/SettingsModal'
 import LogistiqueModal from '@/components/LogistiqueModal'
-import { Plus, Package, Archive, Loader2, Target, PieChart, Settings, BarChart2, Layers, PackageOpen, Truck, CalendarDays } from 'lucide-react'
+import { Plus, Package, Archive, Loader2, Target, PieChart, Settings, BarChart2, Layers, PackageOpen, Truck, CalendarDays, Camera } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
 type Tab = 'stock' | 'archives' | 'stats' | 'objectifs' | 'tresorerie' | 'logistique' | 'calendrier'
@@ -48,8 +49,9 @@ export default function DashboardPage() {
   const [sellItem, setSellItem]           = useState<InventoryItem | null>(null)
   const [lotSellItem, setLotSellItem]     = useState<InventoryItem | null>(null)
   const [deleteItem, setDeleteItem]       = useState<InventoryItem | null>(null)
-  const [settingsOpen, setSettingsOpen]   = useState(false)
-  const [detailItem, setDetailItem]       = useState<InventoryItem | null>(null)
+  const [settingsOpen, setSettingsOpen]     = useState(false)
+  const [detailItem, setDetailItem]         = useState<InventoryItem | null>(null)
+  const [liveScannerOpen, setLiveScannerOpen] = useState(false)
 
   const stats = useMemo(
     () => calcStats(items, settings.initial_capital, consumables, settings.romain_owed_pokemon, settings.celian_owed_pokemon),
@@ -72,6 +74,12 @@ export default function DashboardPage() {
   }, [])
 
   // --- Handlers ---
+  async function handleQuickAdd(data: ItemFormData) {
+    const created = await addItem(data)
+    setItems((prev) => [created, ...prev])
+    setActiveTab('stock')
+  }
+
   async function handleSave(data: ItemFormData, id?: string) {
     if (id && data.is_lot) {
       const { updated, deletedIds } = await editLot(id, data)
@@ -212,6 +220,14 @@ export default function DashboardPage() {
               <span className="hidden sm:inline">Logistique</span>
             </button>
             <button
+              onClick={() => setLiveScannerOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-colors border border-zinc-700/60"
+              title="Scanner Live"
+            >
+              <Camera size={13} />
+              <span className="hidden sm:inline">Scanner</span>
+            </button>
+            <button
               onClick={() => { setEditItemState(null); setAddEditOpen(true) }}
               className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-black rounded-xl text-xs font-bold transition-colors"
             >
@@ -350,6 +366,13 @@ export default function DashboardPage() {
         open={logistiqueOpen}
         onClose={() => setLogistiqueOpen(false)}
         onSave={handleAddConsumable}
+      />
+
+      <CardScannerLive
+        open={liveScannerOpen}
+        onClose={() => setLiveScannerOpen(false)}
+        onQuickAdd={handleQuickAdd}
+        defaultVintedFees={settings.default_vinted_fees}
       />
     </div>
   )
