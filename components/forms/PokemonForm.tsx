@@ -3,9 +3,10 @@
 import { useState, Dispatch, SetStateAction } from 'react'
 import Input from '@/components/ui/Input'
 import ProfitCalculator from '@/components/ProfitCalculator'
+import CardScannerModal, { ScanData } from '@/components/CardScannerModal'
 import { GRADING_COMPANIES, ItemFormData, POKEMON_RARITIES } from '@/types'
 import { formatCurrency } from '@/lib/calculations'
-import { TrendingUp, Calculator, Sparkles, Plus, Trash2 } from 'lucide-react'
+import { TrendingUp, Calculator, Sparkles, Plus, Trash2, Camera } from 'lucide-react'
 
 interface PokemonFormProps {
   form: ItemFormData
@@ -26,8 +27,21 @@ export default function PokemonForm({
   itemStatus, cashInHand,
 }: PokemonFormProps) {
   const lotLocked = false
-  const [calcOpen, setCalcOpen]       = useState(false)
-  const [hitsEnabled, setHitsEnabled] = useState(false)
+  const [calcOpen, setCalcOpen]         = useState(false)
+  const [scanOpen, setScanOpen]         = useState(false)
+  const [hitsEnabled, setHitsEnabled]   = useState(false)
+
+  function handleScanResult(data: Partial<ScanData>) {
+    setForm((p) => ({
+      ...p,
+      ...(data.pokemon_name    && { pokemon_name: data.pokemon_name, item_name: data.pokemon_name }),
+      ...(data.card_number     && { card_number: data.card_number }),
+      ...(data.extension       && { extension: data.extension }),
+      ...(data.expected_sale_price && { expected_sale_price: data.expected_sale_price }),
+      ...(data.rarity          && { rarity: data.rarity }),
+    }))
+    if (data.rarity) setRaritySearch(data.rarity)
+  }
 
   function setNbHits(n: number) {
     const clamped = Math.max(0, n)
@@ -73,6 +87,12 @@ export default function PokemonForm({
         initialSellPrice={sellEst}
         initialFees={0}
         roiTarget={roiTarget}
+      />
+
+      <CardScannerModal
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onResult={handleScanResult}
       />
 
       {/* Prix d'achat + Simuler (masqué en mode lot) */}
@@ -420,20 +440,38 @@ export default function PokemonForm({
       )}
 
       {/* Nom carte + Numéro */}
-      <div className="grid grid-cols-2 gap-3">
-        <Input
-          label="Nom du Pokémon"
-          required
-          placeholder="Mewtwo"
-          value={form.pokemon_name}
-          onChange={(e) => setForm((p) => ({ ...p, pokemon_name: e.target.value, item_name: e.target.value }))}
-        />
-        <Input
-          label="N° de carte"
-          placeholder="052/078"
-          value={form.card_number}
-          onChange={set('card_number')}
-        />
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-zinc-400">
+            Nom du Pokémon <span className="text-zinc-600">*</span>
+          </label>
+          <button
+            type="button"
+            onClick={() => setScanOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/40 text-[11px] font-semibold transition-all"
+          >
+            <Camera size={11} />
+            Scanner
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <input
+            required
+            placeholder="Mewtwo"
+            value={form.pokemon_name}
+            onChange={(e) => setForm((p) => ({ ...p, pokemon_name: e.target.value, item_name: e.target.value }))}
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:border-zinc-600 focus:ring-zinc-600/20 transition-colors"
+          />
+          <input
+            placeholder="052/078"
+            value={form.card_number}
+            onChange={set('card_number')}
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:border-zinc-600 focus:ring-zinc-600/20 transition-colors"
+          />
+        </div>
+        {errors.item_name && (
+          <p className="text-[11px] text-red-400">{errors.item_name}</p>
+        )}
       </div>
 
       <Input
