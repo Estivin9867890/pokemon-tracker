@@ -28,7 +28,8 @@ interface ApiCard {
 export interface DetectedCard {
   uid: string
   apiId: string
-  name: string
+  name: string       // English name (pokemontcg.io)
+  nameFR: string     // French name (TCGdex, empty if not found)
   number: string
   setName: string
   setCode: string
@@ -131,8 +132,11 @@ interface CardInfo { number: string | null; setCode: string | null }
 
 function parseCardInfo(rawText: string): CardInfo {
   let text = rawText.replace(/\n/g, ' ')
+  // Collapse digit fragments: "2 26" → "226"
   text = text.replace(/(\d)\s+(\d)/g, '$1$2')
   text = text.replace(/(\d)\s+(\d)/g, '$1$2')
+  // Collapse spaces around "/": "079 / 189" → "079/189"
+  text = text.replace(/(\d)\s*\/\s*(\d)/g, '$1/$2')
   text = text.replace(/\s+/g, ' ')
 
   const patterns = [
@@ -182,6 +186,20 @@ function getMarketPrice(card: ApiCard): string {
     }
   }
   return ''
+}
+
+// ── TCGdex : noms français (api.tcgdex.net) ──────────────────────────────────
+async function fetchFrenchName(tcgId: string): Promise<string> {
+  try {
+    const res = await fetch(`https://api.tcgdex.net/v2/fr/cards/${tcgId}`, {
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!res.ok) return ''
+    const json = await res.json() as { name?: string }
+    return json.name ?? ''
+  } catch {
+    return ''
+  }
 }
 
 // ── API fetch with ambiguity detection ───────────────────────────────────────
@@ -344,16 +362,30 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
             ? applyDigitalZoomCrop(canvas, zoomRef.current)
             : canvas
 
+          // Pass 1: bottom 30% at ×3
           const ocrCanvas = cropScalePreprocess(zoomedCanvas, 0.70, 3)
           const { data }  = await workerRef.current.recognize(ocrCanvas)
           if (!mountedRef.current) return
 
-          const { number, setCode } = parseCardInfo(data.text)
+          let { number, setCode } = parseCardInfo(data.text)
+
+          // Pass 2: if no number found, try tighter bottom 12% at ×5 (just the number strip)
+          if (!number) {
+            const ocrCanvas2 = cropScalePreprocess(zoomedCanvas, 0.88, 5)
+            const { data: data2 } = await workerRef.current.recognize(ocrCanvas2)
+            if (!mountedRef.current) return
+            const res2 = parseCardInfo(data2.text)
+            number  = res2.number
+            setCode = res2.setCode
+            if (mountedRef.current) setOcrDebug(`[P2] ${data2.text.slice(0, 60).replace(/\n/g, ' ')}`)
+          } else {
+            if (mountedRef.current) setOcrDebug(data.text.slice(0, 60).replace(/\n/g, ' '))
+          }
+
           if (!number) return
 
           const now = Date.now()
           const key = `${number}-${setCode ?? ''}`
-          if (mountedRef.current) setOcrDebug(`${number}${setCode ? ` · ${setCode}` : ''}`)
 
           const last = lastDetectionRef.current
           if (last && last.key === key && now - last.time < SAME_CARD_DEBOUNCE_MS) return
@@ -376,10 +408,15 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
           if (detectedCardsRef.current.some((c) => c.apiId === apiCard.id && !savedUidsRef.current.has(c.uid))) return
 
           const resolvedCode = apiCard.set?.ptcgoCode ?? setCode ?? ''
+          // Fetch French name from TCGdex (non-blocking, parallel-ish)
+          const nameFR = await fetchFrenchName(apiCard.id)
+          if (!mountedRef.current) return
+
           const card: DetectedCard = {
             uid:         `${apiCard.id}-${now}`,
             apiId:       apiCard.id,
             name:        apiCard.name,
+            nameFR,
             number,
             setName:     apiCard.set?.name ?? '',
             setCode:     resolvedCode,
@@ -423,6 +460,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
     const key     = `${apiCard.number}-${code}`
     const card: DetectedCard = {
       uid: `${apiCard.id}-${now}`, apiId: apiCard.id, name: apiCard.name,
+      nameFR: '',   // will stay empty for manual selections (acceptable)
       number: apiCard.number, setName: apiCard.set?.name ?? '', setCode: code,
       rarityFR: RARITY_MAP[apiCard.rarity ?? ''] ?? apiCard.rarity ?? '',
       imageUrl: apiCard.images?.small ?? '',
@@ -445,11 +483,12 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
     setSaving(true)
     const price     = quickPrice || quickAddCard.cmTrend || quickAddCard.marketPrice
     const salePrice = quickAddCard.cmTrend || quickAddCard.marketPrice
+    const displayName = quickAddCard.nameFR || quickAddCard.name
     const formData: ItemFormData = {
-      item_name: quickAddCard.name, purchase_price: price,
+      item_name: displayName, purchase_price: price,
       vinted_fees: String(defaultVintedFees), expected_sale_price: salePrice,
       location: quickLocation === 'CELIAN' ? 'Chez Célian' : 'Chez Romain',
-      notes: '', pokemon_name: quickAddCard.name, card_number: quickAddCard.number,
+      notes: '', pokemon_name: displayName, card_number: quickAddCard.number,
       extension: quickAddCard.setName, rarity: quickAddCard.rarityFR,
       pokemon_category: 'SINGLE', poke_location: quickLocation,
       is_graded: false, grading_company: '', grading_note: '',
@@ -699,8 +738,11 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
 
                     <div className="flex-1 min-w-0">
                       <p className={`text-[13px] font-semibold truncate leading-tight ${isSaved ? 'text-emerald-400' : 'text-white'}`}>
-                        {card.name}
+                        {card.nameFR || card.name}
                       </p>
+                      {card.nameFR && card.nameFR !== card.name && (
+                        <p className="text-[9px] text-white/20 truncate">{card.name}</p>
+                      )}
                       <p className="text-[10px] text-white/35 mt-0.5 font-mono">{codeLabel}</p>
                     </div>
 
@@ -747,7 +789,12 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
                   {quickAddCard.imageUrl && <img src={quickAddCard.imageUrl} alt={quickAddCard.name} className="w-full h-full object-cover" />}
                 </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-white truncate">{quickAddCard.name}</p>
+                  <p className="text-sm font-semibold text-white truncate">
+                    {quickAddCard.nameFR || quickAddCard.name}
+                  </p>
+                  {quickAddCard.nameFR && quickAddCard.nameFR !== quickAddCard.name && (
+                    <p className="text-[9px] text-white/25 truncate">{quickAddCard.name}</p>
+                  )}
                   <p className="text-[10px] text-white/35 mt-0.5 font-mono">{quickAddCard.setCode} {quickAddCard.number.split('/')[0]}</p>
                   <p className="text-[10px] text-white/25">{quickAddCard.rarityFR}</p>
                 </div>
