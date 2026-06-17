@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { Consumable, InventoryItem, ItemFormData, AppSettings, DEFAULT_SETTINGS } from '@/types'
 import { calcStats } from '@/lib/calculations'
-import { listItems, addItem, addLot, editItem, editLot, markSold, markReceived, markHitSold, patchSalePrice, removeItem, toggleVinted, listConsumables, addConsumable, editConsumable, removeConsumable, sellLotPartial, archiveCompletedLots } from '@/lib/db'
+import { listItems, addItem, addLot, editItem, editLot, markSold, markReceived, markHitSold, patchSalePrice, removeItem, toggleVinted, listConsumables, addConsumable, editConsumable, removeConsumable, sellLotPartial, archiveCompletedLots, restoreToStock } from '@/lib/db'
 import { getSettings, saveSettings } from '@/lib/settings'
 import StatsBar from '@/components/StatsBar'
 import LotTracker from '@/components/LotTracker'
@@ -167,6 +167,11 @@ export default function DashboardPage() {
     setConsumables((prev) => prev.filter((c) => c.id !== id))
   }
 
+  async function handleRestoreToStock(item: InventoryItem) {
+    const restored = await restoreToStock(item.id)
+    setItems((prev) => prev.map((i) => (i.id === item.id ? restored : i)))
+  }
+
   async function handleCleanupLots() {
     const archived = await archiveCompletedLots()
     if (archived.length > 0) {
@@ -297,6 +302,7 @@ export default function DashboardPage() {
                   onDelete={(item) => setDeleteItem(item)}
                   onDetail={(item) => setDetailItem(item)}
                   onPatchSalePrice={handlePatchSalePrice}
+                  onRestoreToStock={handleRestoreToStock}
                 />
               )}
               {activeTab === 'stats'      && <StatsTab items={items} consumablesTotal={stats.consumablesTotal} stats={stats} />}

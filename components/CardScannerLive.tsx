@@ -80,6 +80,22 @@ const ZOOM_MIN              = 1.0
 const ZOOM_MAX              = 5.0
 const ZOOM_STEP             = 0.5
 
+// ── Digital zoom crop (aligns canvas to what the CSS-scaled video shows) ────
+function applyDigitalZoomCrop(canvas: HTMLCanvasElement, zoomFactor: number): HTMLCanvasElement {
+  if (zoomFactor <= 1) return canvas
+  const w = canvas.width
+  const h = canvas.height
+  const cropW = Math.floor(w / zoomFactor)
+  const cropH = Math.floor(h / zoomFactor)
+  const cropX = Math.floor((w - cropW) / 2)
+  const cropY = Math.floor((h - cropH) / 2)
+  const out   = document.createElement('canvas')
+  out.width   = cropW
+  out.height  = cropH
+  out.getContext('2d')!.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
+  return out
+}
+
 // ── Image preprocessing ─────────────────────────────────────────────────────
 function cropScalePreprocess(
   src: HTMLCanvasElement,
@@ -221,6 +237,8 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
   const listCooldownRef   = useRef(new Map<string, number>())
   const detectedCardsRef  = useRef<DetectedCard[]>([])
   const savedUidsRef      = useRef<Set<string>>(new Set())
+  const zoomRef           = useRef(ZOOM_DEFAULT)
+  const nativeZoomRef     = useRef(false)
 
   const [workerReady, setWorkerReady]     = useState(false)
   const [cameraError, setCameraError]     = useState('')
@@ -240,6 +258,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
   async function applyZoom(val: number) {
     const clamped = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(val / ZOOM_STEP) * ZOOM_STEP))
     setZoom(clamped)
+    zoomRef.current = clamped
     const track = streamRef.current?.getVideoTracks()[0]
     if (!track) return
     try {
@@ -247,10 +266,12 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
       if (cap.zoom) {
         await track.applyConstraints({ advanced: [{ zoom: Math.min(clamped, cap.zoom.max ?? clamped) }] } as any)
         setNativeZoom(true)
+        nativeZoomRef.current = true
         return
       }
     } catch {}
     setNativeZoom(false)
+    nativeZoomRef.current = false
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -264,6 +285,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
     setSavedUids(new Set()); savedUidsRef.current = new Set()
     listCooldownRef.current.clear(); lastDetectionRef.current = null
     isProcessingRef.current = false; setZoom(ZOOM_DEFAULT)
+    zoomRef.current = ZOOM_DEFAULT; nativeZoomRef.current = false
 
     async function init() {
       try {
@@ -278,6 +300,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
         const cap   = (track as any).getCapabilities?.() ?? {}
         if (cap.zoom) {
           setNativeZoom(true)
+          nativeZoomRef.current = true
           await track.applyConstraints({ advanced: [{ zoom: ZOOM_DEFAULT }] } as any).catch(() => {})
         }
       } catch (err) {
@@ -315,7 +338,13 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
           canvas.height = video.videoHeight
           canvas.getContext('2d')!.drawImage(video, 0, 0)
 
-          const ocrCanvas = cropScalePreprocess(canvas, 0.70, 3)
+          // When CSS zoom is used (no native HW zoom), crop the canvas center
+          // to match what the user actually sees on screen
+          const zoomedCanvas = (!nativeZoomRef.current && zoomRef.current > 1)
+            ? applyDigitalZoomCrop(canvas, zoomRef.current)
+            : canvas
+
+          const ocrCanvas = cropScalePreprocess(zoomedCanvas, 0.70, 3)
           const { data }  = await workerRef.current.recognize(ocrCanvas)
           if (!mountedRef.current) return
 

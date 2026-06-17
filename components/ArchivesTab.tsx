@@ -3,7 +3,7 @@
 import { useState, Fragment } from 'react'
 import { InventoryItem } from '@/types'
 import { calcItem, formatCurrency, formatROI, roiColor } from '@/lib/calculations'
-import { Pencil, Trash2, Archive, StickyNote, TrendingUp, TrendingDown, AlertCircle, Check, Loader2, Sparkles, Search, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { Pencil, Trash2, Archive, StickyNote, TrendingUp, TrendingDown, AlertCircle, Check, Loader2, Sparkles, Search, X, ChevronDown, ChevronRight, PackageOpen } from 'lucide-react'
 
 interface ArchivesTabProps {
   items: InventoryItem[]
@@ -12,6 +12,7 @@ interface ArchivesTabProps {
   onDelete: (item: InventoryItem) => void
   onDetail: (item: InventoryItem) => void
   onPatchSalePrice?: (item: InventoryItem, price: number) => Promise<void>
+  onRestoreToStock?: (item: InventoryItem) => Promise<void>
 }
 
 function EmptyArchives() {
@@ -30,9 +31,10 @@ function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDetail, onPatchSalePrice }: ArchivesTabProps) {
+export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDetail, onPatchSalePrice, onRestoreToStock }: ArchivesTabProps) {
   const [patchPrices, setPatchPrices]   = useState<Record<string, string>>({})
   const [patching, setPatching]         = useState<Record<string, boolean>>({})
+  const [restoring, setRestoring]       = useState<Record<string, boolean>>({})
   const [search, setSearch]             = useState('')
   const [expandedLotId, setExpandedLotId] = useState<string | null>(null)
 
@@ -99,6 +101,13 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
     setPatching((p) => ({ ...p, [item.id]: true }))
     await onPatchSalePrice(item, price)
     setPatching((p) => ({ ...p, [item.id]: false }))
+  }
+
+  async function handleRestore(item: InventoryItem) {
+    if (!onRestoreToStock) return
+    setRestoring((r) => ({ ...r, [item.id]: true }))
+    await onRestoreToStock(item)
+    setRestoring((r) => ({ ...r, [item.id]: false }))
   }
 
   if (allEntries.length === 0 && orphanHits.length === 0) return <EmptyArchives />
@@ -357,6 +366,16 @@ export default function ArchivesTab({ items, roiTarget, onEdit, onDelete, onDeta
                         {/* Actions */}
                         <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                            {onRestoreToStock && (
+                              <button
+                                onClick={() => handleRestore(item)}
+                                disabled={restoring[item.id]}
+                                title="Remettre en stock"
+                                className="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-600 hover:text-emerald-400 hover:bg-emerald-400/10 disabled:opacity-40 transition-colors"
+                              >
+                                {restoring[item.id] ? <Loader2 size={12} className="animate-spin" /> : <PackageOpen size={12} />}
+                              </button>
+                            )}
                             <button
                               onClick={() => onEdit(item)}
                               className="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-600 hover:text-white hover:bg-zinc-800 transition-colors"

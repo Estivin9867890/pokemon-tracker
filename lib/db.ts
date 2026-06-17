@@ -401,6 +401,23 @@ export async function patchSalePrice(id: string, actualSalePrice: number): Promi
   return rowToItem(row as Row)
 }
 
+export async function restoreToStock(id: string): Promise<InventoryItem> {
+  const { data: row, error } = await supabase
+    .from('inventory')
+    .update({
+      status:            'En Stock',
+      sold_at:           null,
+      actual_sale_price: null,
+      revenue_generated: null,
+      items_sold:        null,
+    })
+    .eq('id', id)
+    .select()
+    .single()
+  throwIf(error, 'restoreToStock')
+  return rowToItem(row as Row)
+}
+
 export async function removeItem(id: string): Promise<void> {
   const { error } = await supabase.from('inventory').delete().eq('id', id)
   throwIf(error, 'removeItem')
