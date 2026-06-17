@@ -1,7 +1,7 @@
 'use client'
 
-import { useRef, useState, useEffect } from 'react'
-import { X, Plus, CheckCircle2, Loader2, Scan, Camera, Minus } from 'lucide-react'
+import { useRef, useState, useEffect, useCallback } from 'react'
+import { X, Plus, CheckCircle2, Loader2, Scan, Camera, Minus, Search } from 'lucide-react'
 import { ItemFormData } from '@/types'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -16,10 +16,6 @@ interface ApiCard {
     prices?: {
       trendPrice?: number
       averageSellPrice?: number
-      lowPrice?: number
-      avg1?: number
-      avg7?: number
-      avg30?: number
     }
   }
   tcgplayer?: { prices?: Record<string, { market?: number }> }
@@ -28,8 +24,8 @@ interface ApiCard {
 export interface DetectedCard {
   uid: string
   apiId: string
-  name: string       // English name (pokemontcg.io)
-  nameFR: string     // French name (TCGdex, empty if not found)
+  name: string
+  nameFR: string
   number: string
   setName: string
   setCode: string
@@ -41,137 +37,64 @@ export interface DetectedCard {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const RARITY_MAP: Record<string, string> = {
-  'Common': 'Commune',
-  'Uncommon': 'Peu commune',
-  'Rare': 'Rare',
-  'Rare Holo': 'Rare Holo',
-  'Rare Reverse Holo': 'Reverse Holo',
-  'Rare Holo EX': 'EX / GX / V',
-  'Rare Ultra': 'EX / GX / V',
-  'Rare Holo GX': 'EX / GX / V',
-  'Rare Holo V': 'EX / GX / V',
-  'Double Rare': 'EX / GX / V',
-  'Ultra Rare': 'EX / GX / V',
-  'Rare Holo VMAX': 'VMAX / VSTAR',
-  'Rare Holo VSTAR': 'VMAX / VSTAR',
-  'Rare Rainbow': 'Rainbow Rare',
-  'Rare Secret': 'Secret Rare (>set)',
-  'Secret Rare': 'Secret Rare (>set)',
-  'Hyper Rare': 'Secret Rare (>set)',
-  'ACE SPEC Rare': 'Secret Rare (>set)',
-  'Rare Shiny': 'Shiny',
-  'Shiny Rare': 'Shiny',
-  'Shiny Ultra Rare': 'Shiny',
-  'Amazing Rare': 'Amazing Rare',
-  'Promo': 'Promo',
-  'Full Art': 'Full Art',
-  'Illustration Rare': 'Illustration Rare',
+  'Common': 'Commune', 'Uncommon': 'Peu commune', 'Rare': 'Rare',
+  'Rare Holo': 'Rare Holo', 'Rare Reverse Holo': 'Reverse Holo',
+  'Rare Holo EX': 'EX / GX / V', 'Rare Ultra': 'EX / GX / V',
+  'Rare Holo GX': 'EX / GX / V', 'Rare Holo V': 'EX / GX / V',
+  'Double Rare': 'EX / GX / V', 'Ultra Rare': 'EX / GX / V',
+  'Rare Holo VMAX': 'VMAX / VSTAR', 'Rare Holo VSTAR': 'VMAX / VSTAR',
+  'Rare Rainbow': 'Rainbow Rare', 'Rare Secret': 'Secret Rare (>set)',
+  'Secret Rare': 'Secret Rare (>set)', 'Hyper Rare': 'Secret Rare (>set)',
+  'ACE SPEC Rare': 'Secret Rare (>set)', 'Rare Shiny': 'Shiny',
+  'Shiny Rare': 'Shiny', 'Shiny Ultra Rare': 'Shiny', 'Amazing Rare': 'Amazing Rare',
+  'Promo': 'Promo', 'Full Art': 'Full Art', 'Illustration Rare': 'Illustration Rare',
   'Special Illustration Rare': 'Special Illustration Rare',
-  'Trainer Gallery Rare Holo': 'Trainer Gallery',
-  'Radiant Rare': 'AR (Art Rare)',
-  'Super Rare': 'SAR (Special Art Rare)',
-  'Tera': 'AR (Art Rare)',
+  'Trainer Gallery Rare Holo': 'Trainer Gallery', 'Radiant Rare': 'AR (Art Rare)',
+  'Super Rare': 'SAR (Special Art Rare)', 'Tera': 'AR (Art Rare)',
 }
 
-const SCAN_INTERVAL_MS      = 250
-const SAME_CARD_DEBOUNCE_MS = 2_000
-const LIST_COOLDOWN_MS      = 30_000
-const ZOOM_DEFAULT          = 2.0
-const ZOOM_MIN              = 1.0
-const ZOOM_MAX              = 5.0
-const ZOOM_STEP             = 0.5
+const ZOOM_DEFAULT = 1.5
+const ZOOM_MIN     = 1.0
+const ZOOM_MAX     = 4.0
+const ZOOM_STEP    = 0.5
 
-// ── Digital zoom crop (aligns canvas to what the CSS-scaled video shows) ────
-function applyDigitalZoomCrop(canvas: HTMLCanvasElement, zoomFactor: number): HTMLCanvasElement {
-  if (zoomFactor <= 1) return canvas
-  const w = canvas.width
-  const h = canvas.height
-  const cropW = Math.floor(w / zoomFactor)
-  const cropH = Math.floor(h / zoomFactor)
-  const cropX = Math.floor((w - cropW) / 2)
-  const cropY = Math.floor((h - cropH) / 2)
-  const out   = document.createElement('canvas')
-  out.width   = cropW
-  out.height  = cropH
-  out.getContext('2d')!.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
-  return out
+// ── TCGdex search (French names + card data) ──────────────────────────────────
+interface TCGdexCard {
+  id: string
+  localId: string
+  name: string        // French name
+  image?: string
+  set?: { id: string; name: string }
 }
 
-// ── Image preprocessing ─────────────────────────────────────────────────────
-function cropScalePreprocess(
-  src: HTMLCanvasElement,
-  cropFromTop = 0.70,
-  scale = 3,
-): HTMLCanvasElement {
-  const srcH  = src.height
-  const cropY = Math.floor(srcH * cropFromTop)
-  const cropH = srcH - cropY
-
-  const out    = document.createElement('canvas')
-  out.width    = src.width * scale
-  out.height   = cropH * scale
-
-  const ctx = out.getContext('2d')!
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(src, 0, cropY, src.width, cropH, 0, 0, out.width, out.height)
-
-  const img = ctx.getImageData(0, 0, out.width, out.height)
-  const d   = img.data
-  for (let i = 0; i < d.length; i += 4) {
-    const gray     = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]
-    const enhanced = Math.min(255, Math.max(0, (gray - 128) * 2.2 + 128))
-    d[i] = d[i + 1] = d[i + 2] = enhanced
+async function searchTCGdex(query: string): Promise<TCGdexCard[]> {
+  if (!query.trim()) return []
+  try {
+    // Search by name in French
+    const url = `https://api.tcgdex.net/v2/fr/cards?name=${encodeURIComponent(query.trim())}&pageSize=20`
+    const res  = await fetch(url, { signal: AbortSignal.timeout(5000) })
+    if (!res.ok) return []
+    const data = await res.json() as TCGdexCard[]
+    return Array.isArray(data) ? data : []
+  } catch {
+    return []
   }
-  ctx.putImageData(img, 0, 0)
-  return out
 }
 
-// ── OCR text parsing ─────────────────────────────────────────────────────────
-interface CardInfo { number: string | null; setCode: string | null }
-
-function parseCardInfo(rawText: string): CardInfo {
-  let text = rawText.replace(/\n/g, ' ')
-  // Collapse digit fragments: "2 26" → "226"
-  text = text.replace(/(\d)\s+(\d)/g, '$1$2')
-  text = text.replace(/(\d)\s+(\d)/g, '$1$2')
-  // Collapse spaces around "/": "079 / 189" → "079/189"
-  text = text.replace(/(\d)\s*\/\s*(\d)/g, '$1/$2')
-  text = text.replace(/\s+/g, ' ')
-
-  const patterns = [
-    /\b(TG\d{1,2})\/(TG\d{1,2})\b/i,
-    /\b(GG\d{1,2})\/(GG\d{1,2})\b/i,
-    /\b([A-Z]{0,3}\d{1,4})\/(\d{1,4})\b/i,
-  ]
-
-  let cardNumber: string | null = null
-  let numIndex = -1
-
-  for (const re of patterns) {
-    const m = text.match(re)
-    if (m) {
-      const [a, b] = m[0].split('/').map((s) => parseInt(s, 10) || 0)
-      if (a < 1 || b < 1 || b > 800 || a > 800) continue
-      cardNumber = m[0].toUpperCase()
-      numIndex   = text.indexOf(m[0])
-      break
-    }
+async function fetchFrenchName(tcgId: string): Promise<string> {
+  try {
+    const res = await fetch(`https://api.tcgdex.net/v2/fr/cards/${tcgId}`, {
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!res.ok) return ''
+    const json = await res.json() as { name?: string }
+    return json.name ?? ''
+  } catch {
+    return ''
   }
-
-  if (!cardNumber || numIndex === -1) return { number: null, setCode: null }
-
-  const prefix = text.slice(Math.max(0, numIndex - 80), numIndex)
-  const tokens = prefix.trim().split(/\s+/).filter(Boolean)
-  let setCode: string | null = null
-  for (let i = tokens.length - 1; i >= 0; i--) {
-    if (/^[A-Z]{3,5}$/.test(tokens[i])) { setCode = tokens[i]; break }
-  }
-
-  return { number: cardNumber, setCode }
 }
 
-// ── Prices ──────────────────────────────────────────────────────────────────
+// ── pokemontcg.io lookup ──────────────────────────────────────────────────────
 function getCMTrend(card: ApiCard): string {
   const t = card.cardmarket?.prices?.trendPrice
   return t != null ? t.toFixed(2) : ''
@@ -188,49 +111,48 @@ function getMarketPrice(card: ApiCard): string {
   return ''
 }
 
-// ── TCGdex : noms français (api.tcgdex.net) ──────────────────────────────────
-async function fetchFrenchName(tcgId: string): Promise<string> {
-  try {
-    const res = await fetch(`https://api.tcgdex.net/v2/fr/cards/${tcgId}`, {
-      signal: AbortSignal.timeout(4000),
-    })
-    if (!res.ok) return ''
-    const json = await res.json() as { name?: string }
-    return json.name ?? ''
-  } catch {
-    return ''
-  }
-}
-
-// ── API fetch with ambiguity detection ───────────────────────────────────────
-interface FetchResult { best: ApiCard | null; candidates: ApiCard[] }
-
-async function fetchCard(number: string, setCode: string | null): Promise<FetchResult> {
+async function fetchByNumber(number: string, setCode?: string): Promise<ApiCard | null> {
   const numPart = number.split('/')[0]
   const queries = setCode
     ? [`number:"${numPart}" set.ptcgoCode:${setCode}`, `number:"${numPart}"`]
     : [`number:"${numPart}"`]
-
   for (const q of queries) {
     try {
       const res = await fetch(
-        `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&pageSize=8`,
+        `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&pageSize=5`,
         { signal: AbortSignal.timeout(5000) },
       )
       if (!res.ok) continue
       const json = await res.json() as { data: ApiCard[] }
-      const data = json.data ?? []
-      if (!data.length) continue
-
-      if (setCode) {
-        const exact = data.find((c) => c.set?.ptcgoCode === setCode)
-        if (exact) return { best: exact, candidates: [] }
+      if (json.data?.length) {
+        if (setCode) {
+          const exact = json.data.find((c) => c.set?.ptcgoCode === setCode)
+          if (exact) return exact
+        }
+        return json.data[0]
       }
-      if (data.length === 1) return { best: data[0], candidates: [] }
-      return { best: null, candidates: data }
     } catch { continue }
   }
-  return { best: null, candidates: [] }
+  return null
+}
+
+async function fetchByName(nameFR: string, localId?: string): Promise<ApiCard | null> {
+  // Try to find the English card via pokemontcg.io using the TCGdex card ID
+  // TCGdex IDs and pokemontcg.io IDs share the same format (e.g. swsh3-79)
+  if (localId) {
+    try {
+      const res = await fetch(
+        `https://api.pokemontcg.io/v2/cards/${localId}`,
+        { signal: AbortSignal.timeout(5000) },
+      )
+      if (res.ok) {
+        const json = await res.json() as { data: ApiCard }
+        if (json.data) return json.data
+      }
+    } catch {}
+  }
+  // Fallback: search by name (English won't work, but try set+number if available)
+  return null
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -243,40 +165,36 @@ interface Props {
 
 export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVintedFees = 0 }: Props) {
   const videoRef    = useRef<HTMLVideoElement>(null)
-  const canvasRef   = useRef<HTMLCanvasElement>(null)
   const streamRef   = useRef<MediaStream | null>(null)
-  const workerRef   = useRef<import('tesseract.js').Worker | null>(null)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const mountedRef  = useRef(false)
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const savedUidsRef = useRef<Set<string>>(new Set())
 
-  const isProcessingRef   = useRef(false)
-  const showCandidatesRef = useRef(false)
-  const lastDetectionRef  = useRef<{ key: string; time: number } | null>(null)
-  const listCooldownRef   = useRef(new Map<string, number>())
-  const detectedCardsRef  = useRef<DetectedCard[]>([])
-  const savedUidsRef      = useRef<Set<string>>(new Set())
-  const zoomRef           = useRef(ZOOM_DEFAULT)
-  const nativeZoomRef     = useRef(false)
-
-  const [workerReady, setWorkerReady]     = useState(false)
+  const [cameraReady, setCameraReady]     = useState(false)
   const [cameraError, setCameraError]     = useState('')
   const [zoom, setZoom]                   = useState(ZOOM_DEFAULT)
   const [nativeZoom, setNativeZoom]       = useState(false)
+
+  // Search
+  const [query, setQuery]                 = useState('')
+  const [searching, setSearching]         = useState(false)
+  const [searchResults, setSearchResults] = useState<TCGdexCard[]>([])
+  const [loadingCard, setLoadingCard]     = useState<string | null>(null)  // TCGdex card id being loaded
+
+  // Detected cards list
   const [detectedCards, setDetectedCards] = useState<DetectedCard[]>([])
-  const [flashName, setFlashName]         = useState<string | null>(null)
-  const [ocrDebug, setOcrDebug]           = useState('')
-  const [candidates, setCandidates]       = useState<ApiCard[]>([])
+
+  // Quick-add
   const [quickAddCard, setQuickAddCard]   = useState<DetectedCard | null>(null)
   const [quickPrice, setQuickPrice]       = useState('')
   const [quickLocation, setQuickLocation] = useState<'CELIAN' | 'ROMAIN'>('CELIAN')
   const [saving, setSaving]               = useState(false)
   const [savedUids, setSavedUids]         = useState<Set<string>>(new Set())
 
-  // ── Zoom ──────────────────────────────────────────────────────────────────
+  // ── Camera ────────────────────────────────────────────────────────────────
   async function applyZoom(val: number) {
     const clamped = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(val / ZOOM_STEP) * ZOOM_STEP))
     setZoom(clamped)
-    zoomRef.current = clamped
     const track = streamRef.current?.getVideoTracks()[0]
     if (!track) return
     try {
@@ -284,197 +202,106 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
       if (cap.zoom) {
         await track.applyConstraints({ advanced: [{ zoom: Math.min(clamped, cap.zoom.max ?? clamped) }] } as any)
         setNativeZoom(true)
-        nativeZoomRef.current = true
         return
       }
     } catch {}
     setNativeZoom(false)
-    nativeZoomRef.current = false
   }
 
-  // ── Lifecycle ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!open) return
     mountedRef.current = true
+    setCameraReady(false); setCameraError(''); setQuery(''); setSearchResults([])
+    setDetectedCards([]); setQuickAddCard(null); setSavedUids(new Set())
+    savedUidsRef.current = new Set(); setZoom(ZOOM_DEFAULT)
 
-    setWorkerReady(false); setCameraError(''); setDetectedCards([])
-    detectedCardsRef.current = []; setFlashName(null); setOcrDebug('')
-    setQuickAddCard(null); setCandidates([]); showCandidatesRef.current = false
-    setSavedUids(new Set()); savedUidsRef.current = new Set()
-    listCooldownRef.current.clear(); lastDetectionRef.current = null
-    isProcessingRef.current = false; setZoom(ZOOM_DEFAULT)
-    zoomRef.current = ZOOM_DEFAULT; nativeZoomRef.current = false
-
-    async function init() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        })
-        if (!mountedRef.current) { stream.getTracks().forEach((t) => t.stop()); return }
-        streamRef.current = stream
-        if (videoRef.current) videoRef.current.srcObject = stream
-
-        const track = stream.getVideoTracks()[0]
-        const cap   = (track as any).getCapabilities?.() ?? {}
-        if (cap.zoom) {
-          setNativeZoom(true)
-          nativeZoomRef.current = true
-          await track.applyConstraints({ advanced: [{ zoom: ZOOM_DEFAULT }] } as any).catch(() => {})
-        }
-      } catch (err) {
-        if (!mountedRef.current) return
-        const n = (err as Error).name
-        setCameraError(
-          n === 'NotAllowedError' ? "Accès caméra refusé." :
-          n === 'NotFoundError'  ? "Aucune caméra détectée." :
-          "Impossible d'accéder à la caméra."
-        )
-        return
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+    }).then((stream) => {
+      if (!mountedRef.current) { stream.getTracks().forEach((t) => t.stop()); return }
+      streamRef.current = stream
+      if (videoRef.current) videoRef.current.srcObject = stream
+      const track = stream.getVideoTracks()[0]
+      const cap   = (track as any).getCapabilities?.() ?? {}
+      if (cap.zoom) {
+        setNativeZoom(true)
+        track.applyConstraints({ advanced: [{ zoom: ZOOM_DEFAULT }] } as any).catch(() => {})
       }
-
-      try {
-        const { createWorker } = await import('tesseract.js')
-        const worker = await createWorker('eng')
-        if (!mountedRef.current) { await worker.terminate(); return }
-        workerRef.current = worker
-        setWorkerReady(true)
-      } catch {
-        if (mountedRef.current) setCameraError('Échec OCR. Rechargez la page.')
-        return
-      }
-
-      async function doScan() {
-        if (!mountedRef.current || !workerRef.current || isProcessingRef.current) return
-        if (showCandidatesRef.current) return
-        const video = videoRef.current
-        if (!video || video.readyState < 2 || video.videoWidth === 0) return
-
-        isProcessingRef.current = true
-        try {
-          const canvas = canvasRef.current!
-          canvas.width  = video.videoWidth
-          canvas.height = video.videoHeight
-          canvas.getContext('2d')!.drawImage(video, 0, 0)
-
-          // When CSS zoom is used (no native HW zoom), crop the canvas center
-          // to match what the user actually sees on screen
-          const zoomedCanvas = (!nativeZoomRef.current && zoomRef.current > 1)
-            ? applyDigitalZoomCrop(canvas, zoomRef.current)
-            : canvas
-
-          // Pass 1: bottom 30% at ×3
-          const ocrCanvas = cropScalePreprocess(zoomedCanvas, 0.70, 3)
-          const { data }  = await workerRef.current.recognize(ocrCanvas)
-          if (!mountedRef.current) return
-
-          let { number, setCode } = parseCardInfo(data.text)
-
-          // Pass 2: if no number found, try tighter bottom 12% at ×5 (just the number strip)
-          if (!number) {
-            const ocrCanvas2 = cropScalePreprocess(zoomedCanvas, 0.88, 5)
-            const { data: data2 } = await workerRef.current.recognize(ocrCanvas2)
-            if (!mountedRef.current) return
-            const res2 = parseCardInfo(data2.text)
-            number  = res2.number
-            setCode = res2.setCode
-            if (mountedRef.current) setOcrDebug(`[P2] ${data2.text.slice(0, 60).replace(/\n/g, ' ')}`)
-          } else {
-            if (mountedRef.current) setOcrDebug(data.text.slice(0, 60).replace(/\n/g, ' '))
-          }
-
-          if (!number) return
-
-          const now = Date.now()
-          const key = `${number}-${setCode ?? ''}`
-
-          const last = lastDetectionRef.current
-          if (last && last.key === key && now - last.time < SAME_CARD_DEBOUNCE_MS) return
-          lastDetectionRef.current = { key, time: now }
-
-          if ((listCooldownRef.current.get(key) ?? 0) + LIST_COOLDOWN_MS > now) return
-
-          const { best, candidates: found } = await fetchCard(number, setCode)
-          if (!mountedRef.current) return
-
-          if (!best && found.length > 1) {
-            showCandidatesRef.current = true
-            setCandidates(found)
-            return
-          }
-
-          const apiCard = best
-          if (!apiCard) return
-
-          if (detectedCardsRef.current.some((c) => c.apiId === apiCard.id && !savedUidsRef.current.has(c.uid))) return
-
-          const resolvedCode = apiCard.set?.ptcgoCode ?? setCode ?? ''
-          // Fetch French name from TCGdex (non-blocking, parallel-ish)
-          const nameFR = await fetchFrenchName(apiCard.id)
-          if (!mountedRef.current) return
-
-          const card: DetectedCard = {
-            uid:         `${apiCard.id}-${now}`,
-            apiId:       apiCard.id,
-            name:        apiCard.name,
-            nameFR,
-            number,
-            setName:     apiCard.set?.name ?? '',
-            setCode:     resolvedCode,
-            rarityFR:    RARITY_MAP[apiCard.rarity ?? ''] ?? apiCard.rarity ?? '',
-            imageUrl:    apiCard.images?.small ?? '',
-            marketPrice: getMarketPrice(apiCard),
-            cmTrend:     getCMTrend(apiCard),
-          }
-
-          listCooldownRef.current.set(key, now)
-          setDetectedCards((prev) => { const next = [card, ...prev]; detectedCardsRef.current = next; return next })
-          setFlashName(card.name)
-          setTimeout(() => { if (mountedRef.current) setFlashName(null) }, 2500)
-        } catch {
-          // ignore
-        } finally {
-          isProcessingRef.current = false
-        }
-      }
-
-      intervalRef.current = setInterval(doScan, SCAN_INTERVAL_MS)
-    }
-
-    init()
+      setCameraReady(true)
+    }).catch((err) => {
+      if (!mountedRef.current) return
+      const n = (err as Error).name
+      setCameraError(
+        n === 'NotAllowedError' ? "Accès caméra refusé." :
+        n === 'NotFoundError'  ? "Aucune caméra détectée." :
+        "Impossible d'accéder à la caméra."
+      )
+    })
 
     return () => {
       mountedRef.current = false
-      if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
-      workerRef.current?.terminate().catch(() => {})
-      workerRef.current = null
       streamRef.current?.getTracks().forEach((t) => t.stop())
       streamRef.current = null
-      isProcessingRef.current = false
+      if (searchTimer.current) clearTimeout(searchTimer.current)
     }
   }, [open])
 
-  // ── Ambiguity resolution ─────────────────────────────────────────────────
-  function selectCandidate(apiCard: ApiCard) {
-    const now     = Date.now()
-    const code    = apiCard.set?.ptcgoCode ?? ''
-    const key     = `${apiCard.number}-${code}`
-    const card: DetectedCard = {
-      uid: `${apiCard.id}-${now}`, apiId: apiCard.id, name: apiCard.name,
-      nameFR: '',   // will stay empty for manual selections (acceptable)
-      number: apiCard.number, setName: apiCard.set?.name ?? '', setCode: code,
-      rarityFR: RARITY_MAP[apiCard.rarity ?? ''] ?? apiCard.rarity ?? '',
-      imageUrl: apiCard.images?.small ?? '',
-      marketPrice: getMarketPrice(apiCard), cmTrend: getCMTrend(apiCard),
-    }
-    listCooldownRef.current.set(key, now)
-    setDetectedCards((prev) => { const next = [card, ...prev]; detectedCardsRef.current = next; return next })
-    setFlashName(card.name)
-    setTimeout(() => { if (mountedRef.current) setFlashName(null) }, 2500)
-    setCandidates([]); showCandidatesRef.current = false
-  }
+  // ── Search ────────────────────────────────────────────────────────────────
+  const handleQueryChange = useCallback((q: string) => {
+    setQuery(q)
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    if (!q.trim()) { setSearchResults([]); setSearching(false); return }
 
-  function dismissCandidates() {
-    setCandidates([]); showCandidatesRef.current = false; lastDetectionRef.current = null
+    setSearching(true)
+    searchTimer.current = setTimeout(async () => {
+      const results = await searchTCGdex(q)
+      if (mountedRef.current) {
+        setSearchResults(results)
+        setSearching(false)
+      }
+    }, 350)
+  }, [])
+
+  // Select a card from search results → fetch pokemontcg.io data → add to list
+  async function selectResult(tcgCard: TCGdexCard) {
+    if (loadingCard === tcgCard.id) return
+    setLoadingCard(tcgCard.id)
+
+    try {
+      const now = Date.now()
+      // Try to get pokemontcg.io data (prices + images)
+      let apiCard = await fetchByName(tcgCard.name, tcgCard.id)
+
+      // If ID lookup failed, try by number + set
+      if (!apiCard && tcgCard.localId && tcgCard.set?.id) {
+        apiCard = await fetchByNumber(tcgCard.localId, tcgCard.set.id.toUpperCase())
+      }
+
+      const card: DetectedCard = {
+        uid:         `${tcgCard.id}-${now}`,
+        apiId:       tcgCard.id,
+        name:        apiCard?.name ?? tcgCard.name,
+        nameFR:      tcgCard.name,
+        number:      tcgCard.localId,
+        setName:     tcgCard.set?.name ?? apiCard?.set?.name ?? '',
+        setCode:     apiCard?.set?.ptcgoCode ?? tcgCard.set?.id?.toUpperCase() ?? '',
+        rarityFR:    RARITY_MAP[apiCard?.rarity ?? ''] ?? apiCard?.rarity ?? '',
+        imageUrl:    apiCard?.images?.small ?? (tcgCard.image ? `${tcgCard.image}/low.webp` : ''),
+        marketPrice: apiCard ? getMarketPrice(apiCard) : '',
+        cmTrend:     apiCard ? getCMTrend(apiCard) : '',
+      }
+
+      if (mountedRef.current) {
+        setDetectedCards((prev) => {
+          if (prev.some((c) => c.apiId === card.apiId)) return prev
+          return [card, ...prev]
+        })
+        setQuery('')
+        setSearchResults([])
+      }
+    } finally {
+      if (mountedRef.current) setLoadingCard(null)
+    }
   }
 
   // ── Quick-add ─────────────────────────────────────────────────────────────
@@ -504,11 +331,13 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
   }
 
   function openQuickAdd(card: DetectedCard) {
-    setQuickAddCard(card); setQuickPrice(card.cmTrend || card.marketPrice); setQuickLocation('CELIAN')
+    setQuickAddCard(card)
+    setQuickPrice(card.cmTrend || card.marketPrice)
+    setQuickLocation('CELIAN')
   }
 
   function removeCard(uid: string) {
-    setDetectedCards((prev) => { const next = prev.filter((c) => c.uid !== uid); detectedCardsRef.current = next; return next })
+    setDetectedCards((prev) => prev.filter((c) => c.uid !== uid))
   }
 
   if (!open) return null
@@ -517,9 +346,9 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
     ? { transform: `scale(${zoom})`, transformOrigin: 'center center' } as React.CSSProperties
     : {}
 
-  // Dot positions for the zoom indicator (ZOOM_MAX → ZOOM_MIN)
-  const zoomDots = Array.from({ length: Math.round((ZOOM_MAX - ZOOM_MIN) / ZOOM_STEP) + 1 }, (_, i) =>
-    ZOOM_MAX - i * ZOOM_STEP
+  const zoomDots = Array.from(
+    { length: Math.round((ZOOM_MAX - ZOOM_MIN) / ZOOM_STEP) + 1 },
+    (_, i) => ZOOM_MAX - i * ZOOM_STEP
   )
 
   return (
@@ -530,7 +359,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
         <div className="flex items-center gap-2">
           <Scan size={13} className="text-white/50" />
           <span className="text-sm font-bold text-white tracking-wide">Scanner</span>
-          {workerReady && detectedCards.length > 0 && (
+          {detectedCards.length > 0 && (
             <span className="ml-1 text-[10px] text-white/35 font-medium">
               · {detectedCards.length} carte{detectedCards.length > 1 ? 's' : ''}
             </span>
@@ -543,18 +372,17 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
         </button>
       </div>
 
-      {/* ── Video area ──────────────────────────────────────────────────── */}
+      {/* ── Camera ──────────────────────────────────────────────────────── */}
       <div className="flex-1 relative min-h-0 bg-black overflow-hidden">
         {cameraError ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center px-8">
-            <Camera size={32} className="text-white/15" />
-            <p className="text-sm text-white/40 leading-relaxed">{cameraError}</p>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-8 text-center">
+            <Camera size={28} className="text-white/15" />
+            <p className="text-sm text-white/40">{cameraError}</p>
           </div>
         ) : (
           <>
             <video
-              ref={videoRef}
-              autoPlay playsInline muted
+              ref={videoRef} autoPlay playsInline muted
               className="w-full h-full object-cover transition-transform duration-300"
               style={cssZoomStyle}
             />
@@ -564,15 +392,12 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
               style={{ background: 'radial-gradient(ellipse 60% 72% at 50% 44%, transparent 28%, rgba(0,0,0,0.6) 100%)' }}
             />
 
-            {/* ── Dashed card frame ──────────────────────────────────── */}
+            {/* Card frame */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="relative" style={{ width: '70%', aspectRatio: '5/7' }}>
-                {/* Dashed border */}
                 <div className={`absolute inset-0 rounded-2xl border-2 border-dashed transition-colors duration-500 ${
-                  workerReady ? 'border-white/55' : 'border-white/18'
+                  cameraReady ? 'border-white/55' : 'border-white/18'
                 }`} />
-
-                {/* Solid corner reinforcements */}
                 {[
                   'top-0 left-0 border-t-[3px] border-l-[3px] rounded-tl-2xl',
                   'top-0 right-0 border-t-[3px] border-r-[3px] rounded-tr-2xl',
@@ -580,38 +405,25 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
                   'bottom-0 right-0 border-b-[3px] border-r-[3px] rounded-br-2xl',
                 ].map((cls) => (
                   <div key={cls}
-                    className={`absolute w-7 h-7 transition-colors duration-500 ${workerReady ? 'border-white' : 'border-white/25'} ${cls}`}
+                    className={`absolute w-7 h-7 transition-colors duration-500 ${cameraReady ? 'border-white' : 'border-white/25'} ${cls}`}
                     style={{ margin: '-2px' }}
                   />
                 ))}
-
-                {/* Hint text */}
-                {!flashName && workerReady && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <p className="text-white/45 text-xs font-medium text-center leading-relaxed px-6">
-                      Remplis le cadre{'\n'}avec la carte
-                    </p>
-                  </div>
-                )}
-
-                {/* Loading */}
-                {!workerReady && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-                    <Loader2 size={20} className="text-white/50 animate-spin" />
-                    <p className="text-[11px] text-white/40">Initialisation…</p>
-                  </div>
-                )}
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <p className="text-white/40 text-xs font-medium text-center px-6">
+                    Référence visuelle{'\n'}— recherche manuelle ci-dessous
+                  </p>
+                </div>
               </div>
             </div>
 
-            {/* ── Zoom controls (right side) ─────────────────────────── */}
+            {/* Zoom controls */}
             <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col items-center gap-2.5 z-10">
               <button type="button" onClick={() => applyZoom(zoom + ZOOM_STEP)} disabled={zoom >= ZOOM_MAX}
                 className="w-9 h-9 rounded-full bg-black/60 border border-white/18 text-white flex items-center justify-center disabled:opacity-25 backdrop-blur-sm active:scale-95 transition-transform"
               >
                 <Plus size={15} />
               </button>
-
               <div className="flex flex-col items-center gap-[5px] py-0.5">
                 {zoomDots.map((v) => (
                   <button key={v} type="button" onClick={() => applyZoom(v)}
@@ -623,11 +435,9 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
                   />
                 ))}
               </div>
-
               <span className="text-[10px] font-bold text-white/65 font-mono bg-black/55 px-1.5 py-0.5 rounded-md backdrop-blur-sm">
                 ×{zoom.toFixed(1)}
               </span>
-
               <button type="button" onClick={() => applyZoom(zoom - ZOOM_STEP)} disabled={zoom <= ZOOM_MIN}
                 className="w-9 h-9 rounded-full bg-black/60 border border-white/18 text-white flex items-center justify-center disabled:opacity-25 backdrop-blur-sm active:scale-95 transition-transform"
               >
@@ -635,58 +445,9 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
               </button>
             </div>
 
-            {/* ── Detection badge ────────────────────────────────────── */}
-            {flashName && (
-              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500 text-white text-sm font-bold shadow-xl pointer-events-none whitespace-nowrap">
-                <CheckCircle2 size={14} />
-                {flashName}
-              </div>
-            )}
-
-            {/* OCR debug */}
-            {ocrDebug && workerReady && (
-              <div className="absolute bottom-3 left-3 text-[9px] text-white/25 font-mono pointer-events-none bg-black/40 px-1.5 py-0.5 rounded">
-                {ocrDebug}
-              </div>
-            )}
-
-            {/* ── Ambiguity overlay ──────────────────────────────────── */}
-            {candidates.length > 0 && (
-              <div className="absolute inset-0 bg-black/88 flex flex-col z-20 backdrop-blur-sm">
-                <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-white/8 shrink-0">
-                  <div>
-                    <p className="text-sm font-bold text-white">{candidates.length} cartes trouvées</p>
-                    <p className="text-[11px] text-red-400 mt-0.5">Sélectionnez la bonne</p>
-                  </div>
-                  <button type="button" onClick={dismissCandidates}
-                    className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white/60 hover:text-white"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                  {candidates.map((c) => {
-                    const price = getCMTrend(c) || getMarketPrice(c)
-                    return (
-                      <button key={c.id} type="button" onClick={() => selectCandidate(c)}
-                        className="w-full flex items-center gap-3 p-2.5 rounded-xl bg-white/6 hover:bg-white/12 border border-white/8 hover:border-red-400/40 text-left transition-all active:scale-[0.98]"
-                      >
-                        <div className="w-9 h-[52px] rounded-lg overflow-hidden bg-zinc-900 border border-white/8 shrink-0">
-                          {c.images?.small
-                            ? <img src={c.images.small} alt={c.name} className="w-full h-full object-cover" />
-                            : <div className="w-full h-full flex items-center justify-center"><Camera size={12} className="text-white/20" /></div>
-                          }
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13px] font-semibold text-white truncate">{c.name}</p>
-                          <p className="text-[10px] text-white/45 mt-0.5 font-mono">{c.set?.ptcgoCode} {c.number.split('/')[0]}</p>
-                          <p className="text-[10px] text-white/30">{c.rarity}</p>
-                        </div>
-                        {price && <span className="text-sm font-bold text-emerald-400 shrink-0">{price}€</span>}
-                      </button>
-                    )
-                  })}
-                </div>
+            {!cameraReady && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                <Loader2 size={24} className="text-white animate-spin" />
               </div>
             )}
           </>
@@ -694,28 +455,84 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
       </div>
 
       {/* ── Bottom sheet ────────────────────────────────────────────────── */}
-      <div className="shrink-0 bg-[#080809] border-t border-white/6 flex flex-col relative" style={{ height: 272 }}>
+      <div className="shrink-0 bg-[#080809] border-t border-white/6 flex flex-col relative" style={{ height: 320 }}>
 
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 shrink-0">
-          <span className="text-xs font-bold text-white/70">
-            {detectedCards.length === 0 ? 'En cours' : `En cours · ${detectedCards.length}`}
-          </span>
-          {detectedCards.length > 0 && (
-            <button type="button"
-              onClick={() => { setDetectedCards([]); detectedCardsRef.current = []; listCooldownRef.current.clear() }}
-              className="text-[11px] text-white/25 hover:text-white/55 transition-colors"
-            >
-              Effacer
-            </button>
+        {/* ── Search bar ── */}
+        <div className="px-4 pt-3 pb-2 border-b border-white/5 shrink-0">
+          <div className="relative">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/35 pointer-events-none" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => handleQueryChange(e.target.value)}
+              placeholder="Nom de la carte (ex: Spododo, Pikachu ex…)"
+              className="w-full bg-white/6 border border-white/10 rounded-xl pl-8 pr-8 py-2.5 text-sm text-white placeholder-white/25 focus:outline-none focus:border-white/28 transition-colors"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            {query && (
+              <button type="button" onClick={() => { setQuery(''); setSearchResults([]) }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white transition-colors"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
+          {/* Search results dropdown */}
+          {(searching || searchResults.length > 0) && (
+            <div className="mt-2 bg-[#0d0d10] border border-white/8 rounded-xl overflow-hidden max-h-44 overflow-y-auto">
+              {searching ? (
+                <div className="flex items-center justify-center py-4 gap-2">
+                  <Loader2 size={13} className="animate-spin text-white/40" />
+                  <span className="text-xs text-white/35">Recherche…</span>
+                </div>
+              ) : searchResults.length === 0 ? (
+                <p className="text-xs text-white/30 text-center py-4">Aucune carte trouvée</p>
+              ) : (
+                <div className="divide-y divide-white/4">
+                  {searchResults.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => selectResult(c)}
+                      disabled={loadingCard === c.id}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/6 text-left transition-colors active:scale-[0.99]"
+                    >
+                      {/* Thumbnail */}
+                      <div className="w-7 h-10 rounded-md overflow-hidden bg-zinc-900 border border-white/6 shrink-0">
+                        {c.image
+                          ? <img src={`${c.image}/low.webp`} alt={c.name} className="w-full h-full object-cover" />
+                          : <div className="w-full h-full flex items-center justify-center"><Camera size={10} className="text-white/20" /></div>
+                        }
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] font-semibold text-white truncate">{c.name}</p>
+                        <p className="text-[10px] text-white/35 font-mono mt-0.5">
+                          {c.set?.id?.toUpperCase()} {c.localId}
+                          {c.set?.name && <span className="text-white/20 ml-1">· {c.set.name}</span>}
+                        </p>
+                      </div>
+                      {loadingCard === c.id
+                        ? <Loader2 size={13} className="animate-spin text-white/40 shrink-0" />
+                        : <Plus size={13} className="text-white/40 shrink-0" />
+                      }
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
+        {/* ── Card list ── */}
         <div className="flex-1 overflow-y-auto">
           {detectedCards.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full gap-2">
-              <Camera size={16} className="text-white/12" />
-              <p className="text-[11px] text-white/25">
-                {workerReady ? 'Alignez une carte dans le cadre' : 'Démarrage…'}
+            <div className="flex flex-col items-center justify-center h-full gap-2 px-6 text-center">
+              <Search size={16} className="text-white/12" />
+              <p className="text-[11px] text-white/25 leading-relaxed">
+                Tapez le nom d&apos;une carte pour la trouver,{'\n'}puis appuyez sur <span className="text-white/45">+</span> pour l&apos;ajouter
               </p>
             </div>
           ) : (
@@ -723,33 +540,27 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
               {detectedCards.map((card) => {
                 const isSaved   = savedUids.has(card.uid)
                 const price     = card.cmTrend || card.marketPrice
-                const codeLabel = `${card.setCode} ${card.number.split('/')[0]}`
+                const codeLabel = `${card.setCode} ${card.number}`
 
                 return (
                   <div key={card.uid}
-                    className={`flex items-center gap-3 px-4 py-2.5 transition-colors ${isSaved ? 'bg-emerald-500/4' : ''}`}
+                    className={`flex items-center gap-3 px-4 py-2.5 ${isSaved ? 'bg-emerald-500/4' : ''}`}
                   >
                     <div className="w-9 h-[52px] rounded-lg overflow-hidden bg-zinc-900/80 border border-white/6 shrink-0">
                       {card.imageUrl
-                        ? <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover" />
+                        ? <img src={card.imageUrl} alt={card.nameFR || card.name} className="w-full h-full object-cover" />
                         : <div className="w-full h-full flex items-center justify-center"><Camera size={12} className="text-white/15" /></div>
                       }
                     </div>
-
                     <div className="flex-1 min-w-0">
                       <p className={`text-[13px] font-semibold truncate leading-tight ${isSaved ? 'text-emerald-400' : 'text-white'}`}>
                         {card.nameFR || card.name}
                       </p>
-                      {card.nameFR && card.nameFR !== card.name && (
-                        <p className="text-[9px] text-white/20 truncate">{card.name}</p>
-                      )}
                       <p className="text-[10px] text-white/35 mt-0.5 font-mono">{codeLabel}</p>
                     </div>
-
                     <span className={`text-[13px] font-bold shrink-0 ${price ? 'text-emerald-400' : 'text-white/20'}`}>
                       {price ? `${price}€` : '—'}
                     </span>
-
                     {isSaved ? (
                       <div className="w-8 h-8 flex items-center justify-center rounded-full bg-emerald-500/12 shrink-0">
                         <CheckCircle2 size={14} className="text-emerald-400" />
@@ -773,7 +584,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
           )}
         </div>
 
-        {/* Quick-add panel */}
+        {/* ── Quick-add panel ── */}
         {quickAddCard && (
           <div className="absolute inset-0 bg-[#0d0d10] border-t border-white/6 flex flex-col z-10">
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 shrink-0">
@@ -782,24 +593,17 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
                 <X size={16} />
               </button>
             </div>
-
             <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-[56px] rounded-lg overflow-hidden bg-zinc-900 border border-white/6 shrink-0">
-                  {quickAddCard.imageUrl && <img src={quickAddCard.imageUrl} alt={quickAddCard.name} className="w-full h-full object-cover" />}
+                  {quickAddCard.imageUrl && <img src={quickAddCard.imageUrl} alt={quickAddCard.nameFR || quickAddCard.name} className="w-full h-full object-cover" />}
                 </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-white truncate">
-                    {quickAddCard.nameFR || quickAddCard.name}
-                  </p>
-                  {quickAddCard.nameFR && quickAddCard.nameFR !== quickAddCard.name && (
-                    <p className="text-[9px] text-white/25 truncate">{quickAddCard.name}</p>
-                  )}
-                  <p className="text-[10px] text-white/35 mt-0.5 font-mono">{quickAddCard.setCode} {quickAddCard.number.split('/')[0]}</p>
+                  <p className="text-sm font-semibold text-white truncate">{quickAddCard.nameFR || quickAddCard.name}</p>
+                  <p className="text-[10px] text-white/35 mt-0.5 font-mono">{quickAddCard.setCode} {quickAddCard.number}</p>
                   <p className="text-[10px] text-white/25">{quickAddCard.rarityFR}</p>
                 </div>
               </div>
-
               <div className="flex flex-col gap-1">
                 <label className="text-[11px] font-medium text-white/35">Prix d&apos;achat</label>
                 <div className="relative">
@@ -823,7 +627,6 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
                   </button>
                 )}
               </div>
-
               <div className="flex gap-2">
                 {(['CELIAN', 'ROMAIN'] as const).map((loc) => (
                   <button key={loc} type="button" onClick={() => setQuickLocation(loc)}
@@ -838,7 +641,6 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
                 ))}
               </div>
             </div>
-
             <div className="flex gap-2 px-4 pb-4 pt-2 shrink-0">
               <button type="button" onClick={() => setQuickAddCard(null)}
                 className="flex-1 py-2.5 rounded-xl border border-white/8 text-sm text-white/35 hover:text-white transition-colors"
@@ -856,8 +658,6 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
           </div>
         )}
       </div>
-
-      <canvas ref={canvasRef} className="hidden" />
     </div>
   )
 }
