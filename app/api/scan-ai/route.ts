@@ -33,9 +33,11 @@ export async function POST(req: Request) {
             { text: prompt },
             { inline_data: { mime_type: 'image/jpeg', data: imageBase64 } },
           ]}],
-          generationConfig: { temperature: 0, maxOutputTokens: 60 },
+          generationConfig: { temperature: 0, maxOutputTokens: 200 },
+          // Disable thinking — faster + ensures plain JSON output
+          thinkingConfig: { thinkingBudget: 0 },
         }),
-        signal: AbortSignal.timeout(12000),
+        signal: AbortSignal.timeout(15000),
       },
     )
 
@@ -45,16 +47,19 @@ export async function POST(req: Request) {
     }
 
     const data = await res.json() as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[]
+      candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[]
     }
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+
+    // Gemini 2.5 with thinking may return a thought part first — skip it
+    const parts = data.candidates?.[0]?.content?.parts ?? []
+    const answerPart = parts.find((p) => !p.thought) ?? parts[0]
+    const raw = answerPart?.text ?? ''
     const clean = raw.replace(/```json\n?|\n?```/g, '').trim()
 
     try {
       const parsed = JSON.parse(clean) as { name?: string; number?: string }
       return Response.json({ name: parsed.name ?? '', number: parsed.number ?? '' })
     } catch {
-      // Gemini didn't return JSON — try to extract name from raw text
       const nameMatch = raw.match(/"name"\s*:\s*"([^"]+)"/)
       return Response.json({ name: nameMatch?.[1] ?? '', number: '' })
     }

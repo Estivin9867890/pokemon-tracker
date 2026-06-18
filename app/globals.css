@@ -20,3 +20,13 @@ body {
 }
 
 * { box-sizing: border-box; }
+
+@keyframes scan-line {
+  0%   { top: 4px;    opacity: 0; }
+  5%   { opacity: 1; }
+  95%  { opacity: 1; }
+  100% { top: calc(100% - 4px); opacity: 0; }
+}
+.animate-scan-line {
+  animation: scan-line 2.2s ease-in-out infinite;
+}

@@ -300,36 +300,50 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
       </div>
 
       {/* Camera */}
-      <div className="shrink-0 relative bg-black overflow-hidden" style={{ height: '42vh' }}>
+      <div className="shrink-0 relative bg-black overflow-hidden" style={{ height: '50vh' }}>
         <video ref={videoRef} autoPlay playsInline muted
           className="w-full h-full object-cover" style={cssZoom} />
 
-        <div className="absolute inset-0 pointer-events-none"
-          style={{ background: 'radial-gradient(ellipse 65% 85% at 50% 50%, transparent 40%, rgba(0,0,0,0.5) 100%)' }} />
+        {/* Dark overlay — only corners, keeps center bright */}
+        <div className="absolute inset-0 pointer-events-none" style={{
+          background: 'linear-gradient(to bottom, rgba(0,0,0,0.35) 0%, transparent 18%, transparent 82%, rgba(0,0,0,0.35) 100%)',
+        }} />
 
-        {/* Card frame */}
+        {/* Card frame — 72% width, very visible */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="relative" style={{ width: '58%', aspectRatio: '5/7' }}>
-            <div className="absolute inset-0 rounded-xl"
-              style={{ border: `2px dashed ${cameraReady ? 'rgba(52,211,153,0.6)' : 'rgba(255,255,255,0.2)'}` }} />
-            {['top-0 left-0 rounded-tl-xl border-t-[3px] border-l-[3px]',
-              'top-0 right-0 rounded-tr-xl border-t-[3px] border-r-[3px]',
-              'bottom-0 left-0 rounded-bl-xl border-b-[3px] border-l-[3px]',
-              'bottom-0 right-0 rounded-br-xl border-b-[3px] border-r-[3px]',
+          <div className="relative" style={{ width: '72%', aspectRatio: '5/7' }}>
+            {/* Corner brackets — thick white + green glow */}
+            {[
+              'top-0 left-0 border-t-[4px] border-l-[4px] rounded-tl-2xl',
+              'top-0 right-0 border-t-[4px] border-r-[4px] rounded-tr-2xl',
+              'bottom-0 left-0 border-b-[4px] border-l-[4px] rounded-bl-2xl',
+              'bottom-0 right-0 border-b-[4px] border-r-[4px] rounded-br-2xl',
             ].map((cls) => (
-              <div key={cls} className={`absolute w-6 h-6 ${cls}`}
-                style={{ borderColor: cameraReady ? 'rgba(52,211,153,0.8)' : 'rgba(255,255,255,0.3)', margin: '-2px' }} />
+              <div key={cls} className={`absolute w-9 h-9 ${cls}`}
+                style={{
+                  borderColor: cameraReady ? '#34d399' : 'rgba(255,255,255,0.5)',
+                  margin: '-2px',
+                  filter: cameraReady ? 'drop-shadow(0 0 6px rgba(52,211,153,0.9))' : 'none',
+                }} />
             ))}
+            {/* Scanning line animation */}
+            {cameraReady && !scanning && (
+              <div className="absolute inset-x-0 overflow-hidden rounded-2xl" style={{ top: '4px', bottom: '4px' }}>
+                <div className="absolute inset-x-0 h-[2px] animate-scan-line"
+                  style={{ background: 'linear-gradient(90deg, transparent, rgba(52,211,153,0.8), transparent)' }} />
+              </div>
+            )}
           </div>
         </div>
 
         {/* Scanning overlay */}
         {scanning && (
-          <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-3">
-            <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
-              <Loader2 size={24} className="animate-spin text-emerald-400" />
+          <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-3">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center"
+              style={{ boxShadow: '0 0 30px rgba(52,211,153,0.3)' }}>
+              <Loader2 size={28} className="animate-spin text-emerald-400" />
             </div>
-            <p className="text-[13px] text-white/70 font-medium">Analyse IA en cours…</p>
+            <p className="text-[14px] text-white font-semibold">Analyse IA…</p>
           </div>
         )}
 
