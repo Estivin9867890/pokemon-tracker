@@ -14,13 +14,13 @@ export async function POST(req: Request) {
   }
 
   const prompt = [
-    'This is a French Pokémon TCG card.',
-    'Extract ONLY:',
-    '1. The Pokémon name in French (large bold text at the top of the card, e.g. "Chipie", "Dracaufeu", "Pikachu ex")',
-    '2. The card number (bottom of card, e.g. "106/189")',
-    'Reply ONLY with valid JSON, nothing else: {"name": "...", "number": "..."}',
-    'If you cannot read the card, reply: {"name": "", "number": ""}',
-  ].join(' ')
+    'This is a photo of a French Pokémon TCG card.',
+    'Read the card and extract:',
+    '1. The Pokémon name in French — it is the large bold text near the top of the card (examples: "Sorboul", "Dracaufeu ex", "Pikachu", "Chipie").',
+    '2. The card number — small text at the bottom of the card (examples: "045/195", "106/189").',
+    'Reply ONLY with valid JSON: {"name": "...", "number": "..."}',
+    'If unreadable, reply: {"name": "", "number": ""}',
+  ].join('\n')
 
   try {
     const res = await fetch(
@@ -34,8 +34,7 @@ export async function POST(req: Request) {
             { inline_data: { mime_type: 'image/jpeg', data: imageBase64 } },
           ]}],
           generationConfig: { temperature: 0, maxOutputTokens: 200 },
-          // Disable thinking — faster + ensures plain JSON output
-          thinkingConfig: { thinkingBudget: 0 },
+          thinkingConfig: { thinkingBudget: 1024 },
         }),
         signal: AbortSignal.timeout(15000),
       },
@@ -47,12 +46,21 @@ export async function POST(req: Request) {
     }
 
     const data = await res.json() as {
-      candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[]
+      candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; finishReason?: string }[]
+      promptFeedback?: { blockReason?: string }
     }
 
-    // Gemini 2.5 with thinking may return a thought part first — skip it
-    const parts = data.candidates?.[0]?.content?.parts ?? []
-    const answerPart = parts.find((p) => !p.thought) ?? parts[0]
+    if (data.promptFeedback?.blockReason) {
+      return Response.json({ error: `Blocked: ${data.promptFeedback.blockReason}` }, { status: 422 })
+    }
+
+    const candidate = data.candidates?.[0]
+    if (!candidate?.content?.parts?.length) {
+      return Response.json({ error: `No response (finishReason: ${candidate?.finishReason ?? 'unknown'})` }, { status: 422 })
+    }
+
+    const parts = candidate.content.parts
+    const answerPart = parts.find((p) => !p.thought) ?? parts[parts.length - 1]
     const raw = answerPart?.text ?? ''
     const clean = raw.replace(/```json\n?|\n?```/g, '').trim()
 
@@ -61,7 +69,8 @@ export async function POST(req: Request) {
       return Response.json({ name: parsed.name ?? '', number: parsed.number ?? '' })
     } catch {
       const nameMatch = raw.match(/"name"\s*:\s*"([^"]+)"/)
-      return Response.json({ name: nameMatch?.[1] ?? '', number: '' })
+      const numMatch = raw.match(/"number"\s*:\s*"([^"]+)"/)
+      return Response.json({ name: nameMatch?.[1] ?? '', number: numMatch?.[1] ?? '' })
     }
   } catch (err) {
     return Response.json({ error: (err as Error).message }, { status: 500 })
