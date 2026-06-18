@@ -379,6 +379,7 @@ export default function DashboardPage() {
         onClose={() => setLiveScannerOpen(false)}
         onQuickAdd={handleQuickAdd}
         defaultVintedFees={settings.default_vinted_fees}
+        existingLots={items.filter(i => i.is_lot)}
       />
     </div>
   )

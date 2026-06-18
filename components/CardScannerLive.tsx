@@ -2,7 +2,7 @@
 
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { X, Plus, CheckCircle2, Loader2, Camera, Minus, Search, ScanLine, Zap } from 'lucide-react'
-import { ItemFormData, FundedBy, GRADING_COMPANIES } from '@/types'
+import { ItemFormData, InventoryItem, FundedBy, GRADING_COMPANIES } from '@/types'
 
 export interface DetectedCard {
   uid: string; apiId: string; name: string; nameFR: string
@@ -29,6 +29,7 @@ interface Props {
   onClose: () => void
   onQuickAdd: (data: ItemFormData) => Promise<void>
   defaultVintedFees?: number
+  existingLots?: InventoryItem[]
 }
 
 const RARITY_MAP: Record<string, string> = {
@@ -93,7 +94,7 @@ function captureToBase64(video: HTMLVideoElement): string {
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
-export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVintedFees = 0 }: Props) {
+export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVintedFees = 0, existingLots = [] }: Props) {
   const videoRef    = useRef<HTMLVideoElement>(null)
   const streamRef   = useRef<MediaStream | null>(null)
   const mountedRef  = useRef(false)
@@ -129,6 +130,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
   const [quickGradingNote, setQuickGradingNote] = useState('')
   const [quickNotes, setQuickNotes]   = useState('')
   const [quickIsLot, setQuickIsLot]   = useState(false)
+  const [quickLotId, setQuickLotId]   = useState<string | null>(null)
   const [quickLotCost, setQuickLotCost] = useState('')
   const [quickLotNb, setQuickLotNb]   = useState('')
   const [saving, setSaving]           = useState(false)
@@ -279,6 +281,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
     setQuickGradingNote('')
     setQuickNotes('')
     setQuickIsLot(false)
+    setQuickLotId(null)
     setQuickLotCost('')
     setQuickLotNb('')
   }
@@ -287,10 +290,11 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
     if (!quickAddCard) return
     setSaving(true)
     const name = quickAddCard.nameFR || quickAddCard.name
-    const price = quickIsLot ? '' : (quickPrice || quickAddCard.cmTrend || quickAddCard.marketPrice)
+    const price = (quickIsLot && !quickLotId) ? '' : (quickPrice || quickAddCard.cmTrend || quickAddCard.marketPrice)
     try {
       await onQuickAdd({
-        item_name: name, purchase_price: price,
+        item_name: name,
+        purchase_price: quickLotId ? '0' : price,
         vinted_fees: String(defaultVintedFees),
         expected_sale_price: quickExpectedPrice || quickAddCard.cmTrend || quickAddCard.marketPrice,
         location: quickLocation === 'CELIAN' ? 'Chez Célian' : 'Chez Romain',
@@ -300,8 +304,9 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
         rarity: quickAddCard.rarityFR, pokemon_category: quickCategory,
         poke_location: quickLocation,
         is_graded: quickIsGraded, grading_company: quickGradingCompany, grading_note: quickGradingNote,
-        is_lot: quickIsLot, lot_total_cost: quickLotCost, nb_articles: quickLotNb,
+        is_lot: quickIsLot && !quickLotId, lot_total_cost: quickLotCost, nb_articles: quickLotNb,
         funded_by: quickFundedBy, hits: [],
+        lot_id: quickLotId ?? undefined,
       })
       setSavedUids((prev) => new Set([...prev, quickAddCard.uid]))
       setQuickAddCard(null); setQuickPrice('')
@@ -345,42 +350,38 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
     ? { transform: `scale(${zoom})`, transformOrigin: 'center center' } as React.CSSProperties
     : {}
 
+  const activeLots = existingLots.filter(l => l.status !== 'Vendu')
+
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-[#0a0a0a]"
+    <div className="fixed inset-0 z-[70] flex flex-col bg-black"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
 
-      {/* Header */}
-      <div className="shrink-0 flex items-center justify-between px-5 h-14 bg-[#0a0a0a] border-b border-white/5">
-        <div className="flex items-center gap-2.5">
-          <ScanLine size={16} className="text-emerald-400" />
-          <span className="text-[15px] font-bold text-white tracking-tight">Scanner</span>
-          {detectedCards.length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/25 text-[10px] text-emerald-400 font-bold">
-              {detectedCards.length}
-            </span>
-          )}
-        </div>
-        <button type="button" onClick={onClose}
-          className="w-9 h-9 flex items-center justify-center rounded-full bg-white/6 text-white/60 hover:text-white hover:bg-white/12 transition-colors">
-          <X size={18} />
-        </button>
-      </div>
-
-      {/* Camera */}
-      <div className="shrink-0 relative bg-black overflow-hidden"
-        style={{ height: scanned ? '25vh' : '50vh', transition: 'height 0.3s ease-out' }}>
+      {/* Full-screen camera */}
+      <div className="flex-1 relative bg-black overflow-hidden">
         <video ref={videoRef} autoPlay playsInline muted
           className="w-full h-full object-cover" style={cssZoom} />
 
-        {/* Dark overlay — only corners, keeps center bright */}
-        <div className="absolute inset-0 pointer-events-none" style={{
-          background: 'linear-gradient(to bottom, rgba(0,0,0,0.35) 0%, transparent 18%, transparent 82%, rgba(0,0,0,0.35) 100%)',
-        }} />
+        {/* Top bar overlay */}
+        <div className="absolute top-0 inset-x-0 z-10 flex items-center justify-between px-4 pt-3 pb-6"
+          style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.6), transparent)' }}>
+          <div className="flex items-center gap-2">
+            <ScanLine size={14} className="text-emerald-400" />
+            <span className="text-[13px] font-bold text-white/80">Scanner</span>
+            {detectedCards.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-[9px] text-emerald-400 font-bold">
+                {detectedCards.length}
+              </span>
+            )}
+          </div>
+          <button type="button" onClick={onClose}
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-black/50 text-white/70 hover:text-white active:scale-95 transition-all">
+            <X size={18} />
+          </button>
+        </div>
 
-        {/* Card frame — 72% width, very visible */}
+        {/* Card frame */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="relative" style={{ width: '72%', aspectRatio: '5/7' }}>
-            {/* Corner brackets — thick white + green glow */}
             {[
               'top-0 left-0 border-t-[4px] border-l-[4px] rounded-tl-2xl',
               'top-0 right-0 border-t-[4px] border-r-[4px] rounded-tr-2xl',
@@ -394,7 +395,6 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
                   filter: cameraReady ? 'drop-shadow(0 0 6px rgba(52,211,153,0.9))' : 'none',
                 }} />
             ))}
-            {/* Scanning line animation */}
             {cameraReady && !scanning && (
               <div className="absolute inset-x-0 overflow-hidden rounded-2xl" style={{ top: '4px', bottom: '4px' }}>
                 <div className="absolute inset-x-0 h-[2px] animate-scan-line"
@@ -431,13 +431,9 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
         </div>
       </div>
 
-      {/* Bottom panel */}
-      <div className="flex-1 flex flex-col min-h-0 bg-[#0e0e10]">
-
-        {/* AI scan button + search */}
-        <div className="shrink-0 px-4 pt-3 pb-2 space-y-2.5">
-
-          {/* Primary: AI scan button */}
+      {/* Bottom controls */}
+      <div className="shrink-0 bg-[#0e0e10]">
+        <div className="px-4 pt-3 pb-2 space-y-2">
           <button type="button" onClick={handleAiScan} disabled={scanning || !cameraReady}
             className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-black font-bold text-[15px] transition-all active:scale-[0.98]">
             {scanning
@@ -446,7 +442,6 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
             }
           </button>
 
-          {/* Feedback: result or error */}
           {scanResult && !searching && (
             <p className="text-center text-[12px] text-emerald-400 font-medium">
               ✓ Détecté : « {scanResult} »{scanNumber ? ` · ${scanNumber}` : ''}
@@ -456,19 +451,17 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
             <p className="text-center text-[12px] text-red-400">{scanError}</p>
           )}
 
-          {/* Separator */}
           <div className="flex items-center gap-3">
             <div className="flex-1 h-px bg-white/5" />
             <span className="text-[10px] text-white/20 font-medium uppercase tracking-widest">ou tapez le nom</span>
             <div className="flex-1 h-px bg-white/5" />
           </div>
 
-          {/* Manual search */}
           <div className="relative">
             <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none" />
             <input type="text" value={query} onChange={(e) => handleQueryChange(e.target.value)}
               placeholder="Chipie, Dracaufeu ex, Pikachu…"
-              className="w-full bg-white/6 border border-white/8 rounded-2xl pl-9 pr-9 py-3 text-[15px] text-white placeholder-white/20 focus:outline-none focus:border-white/20 focus:bg-white/8 transition-all"
+              className="w-full bg-white/6 border border-white/8 rounded-2xl pl-9 pr-9 py-2.5 text-[14px] text-white placeholder-white/20 focus:outline-none focus:border-white/20 focus:bg-white/8 transition-all"
               autoComplete="off" autoCorrect="off" spellCheck={false} />
             {query
               ? <button type="button" onClick={() => { setQuery(''); setSearchResults([]) }}
@@ -482,97 +475,55 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
           </div>
         </div>
 
-        {/* Scrollable results */}
-        <div className="flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
+        {/* Results (scrollable, max height) */}
+        {(searchResults.length > 0 || (detectedCards.length > 0 && searchResults.length === 0 && !query)) && (
+          <div className="max-h-[35vh] overflow-y-auto px-4 pb-3 space-y-1.5">
+            {searchResults.map((c) => (
+              <button key={c.id} type="button" onClick={() => selectResult(c)} disabled={loadingCard === c.id}
+                className="w-full flex items-center gap-3 px-3 py-2.5 bg-white/4 hover:bg-white/7 active:bg-white/10 rounded-2xl border border-white/6 text-left transition-colors">
+                <div className="w-9 h-[50px] rounded-lg overflow-hidden bg-zinc-900 border border-white/6 shrink-0">
+                  {c.image
+                    ? <img src={`${c.image}/low.webp`} alt={c.name} className="w-full h-full object-cover" />
+                    : <div className="w-full h-full flex items-center justify-center"><Camera size={9} className="text-white/15" /></div>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] font-bold text-white truncate">{c.name}</p>
+                  <p className="text-[10px] text-white/35 font-mono mt-0.5">{c.set?.id?.toUpperCase()} · {c.localId}</p>
+                </div>
+                {loadingCard === c.id
+                  ? <Loader2 size={14} className="animate-spin text-white/30 shrink-0" />
+                  : <Plus size={14} className="text-white/40 shrink-0" />}
+              </button>
+            ))}
 
-          {/* Search / AI results */}
-          {searchResults.length > 0 && (
-            <div className="space-y-1.5">
-              <p className="text-[10px] font-semibold text-white/20 uppercase tracking-widest px-1 py-1">
-                {searchResults.length} résultat{searchResults.length > 1 ? 's' : ''}
-              </p>
-              {searchResults.map((c) => (
-                <button key={c.id} type="button" onClick={() => selectResult(c)} disabled={loadingCard === c.id}
-                  className="w-full flex items-center gap-3.5 px-4 py-3 bg-white/4 hover:bg-white/7 active:bg-white/10 rounded-2xl border border-white/6 text-left transition-colors active:scale-[0.99]">
-                  <div className="w-10 h-[56px] rounded-xl overflow-hidden bg-zinc-900 border border-white/6 shrink-0">
-                    {c.image
-                      ? <img src={`${c.image}/low.webp`} alt={c.name} className="w-full h-full object-cover" />
-                      : <div className="w-full h-full flex items-center justify-center"><Camera size={10} className="text-white/15" /></div>}
+            {detectedCards.length > 0 && searchResults.length === 0 && !query && detectedCards.map((card) => {
+              const isSaved = savedUids.has(card.uid)
+              return (
+                <div key={card.uid}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-2xl border ${isSaved ? 'bg-emerald-500/5 border-emerald-500/15' : 'bg-white/4 border-white/6'}`}>
+                  <div className="w-9 h-[50px] rounded-lg overflow-hidden bg-zinc-900 border border-white/6 shrink-0">
+                    {card.imageUrl ? <img src={card.imageUrl} alt="" className="w-full h-full object-cover" />
+                      : <div className="w-full h-full flex items-center justify-center"><Camera size={9} className="text-white/15" /></div>}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[14px] font-bold text-white truncate">{c.name}</p>
-                    <p className="text-[11px] text-white/35 font-mono mt-0.5">{c.set?.id?.toUpperCase()} · {c.localId}</p>
-                    {c.set?.name && <p className="text-[10px] text-white/20 truncate mt-0.5">{c.set.name}</p>}
+                    <p className={`text-[13px] font-bold truncate ${isSaved ? 'text-emerald-400' : 'text-white'}`}>{card.nameFR || card.name}</p>
+                    <p className="text-[10px] text-white/35 font-mono mt-0.5">{card.setCode} · {card.number}</p>
                   </div>
-                  {loadingCard === c.id
-                    ? <Loader2 size={16} className="animate-spin text-white/30 shrink-0" />
-                    : <div className="w-8 h-8 rounded-full bg-white/8 flex items-center justify-center shrink-0 border border-white/6">
-                        <Plus size={14} className="text-white/50" />
-                      </div>}
-                </button>
-              ))}
-            </div>
-          )}
+                  {isSaved
+                    ? <CheckCircle2 size={18} className="text-emerald-400 shrink-0" />
+                    : <button type="button" onClick={() => openQuickAdd(card)}
+                        className="w-8 h-8 flex items-center justify-center rounded-full bg-white text-black active:scale-90 transition-transform shrink-0">
+                        <Plus size={14} />
+                      </button>}
+                </div>
+              )
+            })}
+          </div>
+        )}
 
-          {/* No results */}
-          {!searching && query.trim().length >= 2 && searchResults.length === 0 && (
-            <p className="text-center text-[12px] text-white/25 py-6">
-              Aucune carte pour « {query} »
-            </p>
-          )}
-
-          {/* Detected (added to list) */}
-          {detectedCards.length > 0 && searchResults.length === 0 && !query && (
-            <div className="space-y-1.5">
-              <p className="text-[10px] font-semibold text-white/20 uppercase tracking-widest px-1 py-1">
-                En attente ({detectedCards.length})
-              </p>
-              {detectedCards.map((card) => {
-                const isSaved = savedUids.has(card.uid)
-                const price   = card.cmTrend || card.marketPrice
-                return (
-                  <div key={card.uid}
-                    className={`flex items-center gap-3.5 px-4 py-3 rounded-2xl border transition-colors ${isSaved ? 'bg-emerald-500/5 border-emerald-500/15' : 'bg-white/4 border-white/6'}`}>
-                    <div className="w-10 h-[56px] rounded-xl overflow-hidden bg-zinc-900 border border-white/6 shrink-0">
-                      {card.imageUrl ? <img src={card.imageUrl} alt="" className="w-full h-full object-cover" />
-                        : <div className="w-full h-full flex items-center justify-center"><Camera size={10} className="text-white/15" /></div>}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-[14px] font-bold truncate ${isSaved ? 'text-emerald-400' : 'text-white'}`}>
-                        {card.nameFR || card.name}
-                      </p>
-                      <p className="text-[11px] text-white/35 font-mono mt-0.5">{card.setCode} · {card.number}</p>
-                      {card.rarityFR && <p className="text-[10px] text-white/20 mt-0.5">{card.rarityFR}</p>}
-                    </div>
-                    <div className="flex flex-col items-end gap-1.5 shrink-0">
-                      {price && <span className="text-[14px] font-bold text-emerald-400">{price}€</span>}
-                      {isSaved
-                        ? <CheckCircle2 size={20} className="text-emerald-400" />
-                        : <button type="button"
-                            onClick={() => openQuickAdd(card)}
-                            className="w-9 h-9 flex items-center justify-center rounded-full bg-white text-black active:scale-90 transition-transform">
-                            <Plus size={16} />
-                          </button>}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {/* Empty state */}
-          {detectedCards.length === 0 && searchResults.length === 0 && !query && !scanning && (
-            <div className="flex flex-col items-center justify-center py-10 gap-4 text-center">
-              <div className="w-14 h-14 rounded-2xl bg-white/4 border border-white/6 flex items-center justify-center">
-                <Zap size={22} className="text-white/20" />
-              </div>
-              <div className="space-y-1">
-                <p className="text-[14px] font-semibold text-white/40">Pointez la carte dans le cadre</p>
-                <p className="text-[12px] text-white/20">puis appuyez sur « Scanner avec l&apos;IA »</p>
-              </div>
-            </div>
-          )}
-        </div>
+        {!searching && query.trim().length >= 2 && searchResults.length === 0 && (
+          <p className="text-center text-[12px] text-white/25 pb-3">Aucune carte pour « {query} »</p>
+        )}
       </div>
 
       {/* Quick-add fullscreen */}
@@ -631,39 +582,87 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
             )}
 
             {/* Ajout en Lot */}
-            <button type="button" onClick={() => setQuickIsLot(!quickIsLot)}
-              className={`w-full rounded-2xl py-2.5 text-[13px] font-bold border transition-all ${
-                quickIsLot
-                  ? 'bg-violet-500/15 border-violet-500/40 text-violet-400'
-                  : 'border-white/8 text-white/30 hover:text-white/50'
-              }`}>
-              📦 Ajout en Lot ? {quickIsLot ? '✓ Activé' : 'Non'}
-            </button>
+            <div className="space-y-2">
+              <button type="button" onClick={() => { setQuickIsLot(!quickIsLot); setQuickLotId(null) }}
+                className={`w-full rounded-2xl py-2.5 text-[13px] font-bold border transition-all ${
+                  quickIsLot || quickLotId
+                    ? 'bg-violet-500/15 border-violet-500/40 text-violet-400'
+                    : 'border-white/8 text-white/30 hover:text-white/50'
+                }`}>
+                📦 Ajout en Lot ? {quickIsLot || quickLotId ? '✓ Oui' : 'Non'}
+              </button>
 
-            {quickIsLot && (
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-white/35 uppercase tracking-wider">Coût total du lot</label>
-                  <div className="relative">
-                    <input type="number" step="0.01" min="0" placeholder="120.00"
-                      value={quickLotCost} onChange={(e) => setQuickLotCost(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 pr-8 text-[15px] font-bold text-white placeholder-white/15 focus:outline-none focus:border-violet-500/40 transition-all" />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[13px] text-white/25 font-bold">€</span>
-                  </div>
+              {(quickIsLot || quickLotId) && (
+                <div className="space-y-2">
+                  {activeLots.length > 0 && (
+                    <>
+                      <label className="text-[11px] font-semibold text-white/35 uppercase tracking-wider">Lot existant</label>
+                      <div className="space-y-1.5 max-h-[20vh] overflow-y-auto">
+                        {activeLots.map((lot) => (
+                          <button key={lot.id} type="button"
+                            onClick={() => { setQuickLotId(quickLotId === lot.lot_id ? null : lot.lot_id); setQuickIsLot(false) }}
+                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left border transition-all ${
+                              quickLotId === lot.lot_id
+                                ? 'bg-violet-500/15 border-violet-500/40'
+                                : 'bg-white/3 border-white/6 hover:bg-white/5'
+                            }`}>
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-[13px] font-bold truncate ${quickLotId === lot.lot_id ? 'text-violet-400' : 'text-white'}`}>
+                                {lot.item_name}
+                              </p>
+                              <p className="text-[10px] text-white/30 mt-0.5">
+                                {lot.items_sold ?? 0}/{lot.item_count ?? '?'} vendus · {lot.purchase_price?.toFixed(2)}€
+                              </p>
+                            </div>
+                            {quickLotId === lot.lot_id && <CheckCircle2 size={16} className="text-violet-400 shrink-0" />}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 h-px bg-white/5" />
+                        <span className="text-[10px] text-white/20 font-medium uppercase">ou nouveau lot</span>
+                        <div className="flex-1 h-px bg-white/5" />
+                      </div>
+                    </>
+                  )}
+
+                  <button type="button"
+                    onClick={() => { setQuickIsLot(true); setQuickLotId(null) }}
+                    className={`w-full rounded-xl py-2 text-[12px] font-bold border transition-all ${
+                      quickIsLot && !quickLotId
+                        ? 'bg-violet-500/15 border-violet-500/40 text-violet-400'
+                        : 'border-white/8 text-white/30 hover:text-white/50'
+                    }`}>
+                    + Créer un nouveau lot
+                  </button>
+
+                  {quickIsLot && !quickLotId && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-semibold text-white/35 uppercase tracking-wider">Coût total</label>
+                        <div className="relative">
+                          <input type="number" step="0.01" min="0" placeholder="120.00"
+                            value={quickLotCost} onChange={(e) => setQuickLotCost(e.target.value)}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 pr-8 text-[15px] font-bold text-white placeholder-white/15 focus:outline-none focus:border-violet-500/40 transition-all" />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[13px] text-white/25 font-bold">€</span>
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-semibold text-white/35 uppercase tracking-wider">Nb d&apos;articles</label>
+                        <input type="number" min="1" placeholder="10"
+                          value={quickLotNb} onChange={(e) => setQuickLotNb(e.target.value)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-[15px] font-bold text-white placeholder-white/15 focus:outline-none focus:border-violet-500/40 transition-all" />
+                      </div>
+                      {quickLotCost && quickLotNb && (
+                        <p className="col-span-2 text-[11px] text-white/30 text-center">
+                          {(parseFloat(quickLotCost) / (parseInt(quickLotNb) || 1)).toFixed(2)}€ / carte
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-white/35 uppercase tracking-wider">Nb d&apos;articles</label>
-                  <input type="number" min="1" placeholder="10"
-                    value={quickLotNb} onChange={(e) => setQuickLotNb(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-[15px] font-bold text-white placeholder-white/15 focus:outline-none focus:border-violet-500/40 transition-all" />
-                </div>
-                {quickLotCost && quickLotNb && (
-                  <p className="col-span-2 text-[11px] text-white/30 text-center">
-                    {(parseFloat(quickLotCost) / (parseInt(quickLotNb) || 1)).toFixed(2)}€ / carte
-                  </p>
-                )}
-              </div>
-            )}
+              )}
+            </div>
 
             {/* Type */}
             <div className="space-y-1.5">
