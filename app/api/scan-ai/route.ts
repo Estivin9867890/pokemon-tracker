@@ -14,17 +14,15 @@ export async function POST(req: Request) {
   }
 
   const prompt = [
-    'This is a photo of a French Pokémon TCG card.',
-    'Read the card and extract:',
-    '1. The Pokémon name in French — it is the large bold text near the top of the card (examples: "Sorboul", "Dracaufeu ex", "Pikachu", "Chipie").',
-    '2. The card number — small text at the bottom of the card (examples: "045/195", "106/189").',
-    'Reply ONLY with valid JSON: {"name": "...", "number": "..."}',
-    'If unreadable, reply: {"name": "", "number": ""}',
+    'Photo of a French Pokémon TCG card. Extract:',
+    '1. name: the Pokémon name in French (large bold text at top, e.g. "Sorboul", "Dracaufeu ex", "Pikachu", "Skitty")',
+    '2. number: card number at bottom (e.g. "045/195", "106/189")',
+    'Reply JSON: {"name":"...","number":"..."}',
   ].join('\n')
 
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -35,11 +33,11 @@ export async function POST(req: Request) {
           ]}],
           generationConfig: {
             temperature: 0,
-            maxOutputTokens: 200,
+            maxOutputTokens: 100,
             responseMimeType: 'application/json',
           },
         }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(10000),
       },
     )
 

@@ -70,7 +70,17 @@ async function searchTCGdex(query: string, signal?: AbortSignal): Promise<TCGdex
     const res = await fetch(`https://api.tcgdex.net/v2/fr/cards?name=${encodeURIComponent(q)}`, { signal })
     if (!res.ok) return []
     const d = await res.json() as TCGdexCard[]
-    return Array.isArray(d) ? d.slice(0, 20) : []
+    if (Array.isArray(d) && d.length > 0) return d.slice(0, 30)
+
+    const base = q.replace(/\s*(ex|gx|vmax|vstar|v|EX|GX|VMAX|VSTAR|V)\s*$/i, '').trim()
+    if (base !== q && base.length >= 2) {
+      const res2 = await fetch(`https://api.tcgdex.net/v2/fr/cards?name=${encodeURIComponent(base)}`, { signal })
+      if (res2.ok) {
+        const d2 = await res2.json() as TCGdexCard[]
+        if (Array.isArray(d2)) return d2.slice(0, 30)
+      }
+    }
+    return []
   } catch { return [] }
 }
 
@@ -84,13 +94,13 @@ async function fetchPrices(tcgId: string): Promise<ApiCard | null> {
 
 // ── Capture & resize canvas to JPEG base64 (small for Gemini) ─────────────────
 function captureToBase64(video: HTMLVideoElement): string {
-  const TARGET_W = 1280
+  const TARGET_W = 800
   const ratio    = TARGET_W / video.videoWidth
   const canvas   = document.createElement('canvas')
   canvas.width   = TARGET_W
   canvas.height  = Math.round(video.videoHeight * ratio)
   canvas.getContext('2d')!.drawImage(video, 0, 0, canvas.width, canvas.height)
-  return canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
+  return canvas.toDataURL('image/jpeg', 0.7).split(',')[1]
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -162,7 +172,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageBase64: base64 }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(10000),
       })
       const data = await res.json() as { name?: string; number?: string; error?: string }
 
