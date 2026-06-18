@@ -33,8 +33,11 @@ export async function POST(req: Request) {
             { text: prompt },
             { inline_data: { mime_type: 'image/jpeg', data: imageBase64 } },
           ]}],
-          generationConfig: { temperature: 0, maxOutputTokens: 200 },
-          thinkingConfig: { thinkingBudget: 1024 },
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 200,
+            responseMimeType: 'application/json',
+          },
         }),
         signal: AbortSignal.timeout(15000),
       },
