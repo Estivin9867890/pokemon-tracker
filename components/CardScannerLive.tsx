@@ -1,10 +1,9 @@
 'use client'
 
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { X, Plus, CheckCircle2, Loader2, Camera, Minus, Search } from 'lucide-react'
+import { X, Plus, CheckCircle2, Loader2, Camera, Minus, Search, ScanLine } from 'lucide-react'
 import { ItemFormData } from '@/types'
 
-// ── Types ──────────────────────────────────────────────────────────────────────
 export interface DetectedCard {
   uid: string; apiId: string; name: string; nameFR: string
   number: string; setName: string; setCode: string
@@ -32,7 +31,6 @@ interface Props {
   defaultVintedFees?: number
 }
 
-// ── Constants ──────────────────────────────────────────────────────────────────
 const RARITY_MAP: Record<string, string> = {
   'Common': 'Commune', 'Uncommon': 'Peu commune', 'Rare': 'Rare',
   'Rare Holo': 'Rare Holo', 'Rare Reverse Holo': 'Reverse Holo',
@@ -52,10 +50,10 @@ const RARITY_MAP: Record<string, string> = {
 
 const ZOOM_DEFAULT = 1.5
 const ZOOM_MIN     = 1.0
-const ZOOM_MAX     = 4.0
+const ZOOM_MAX     = 3.0
 const ZOOM_STEP    = 0.5
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 function getCMTrend(c: ApiCard) { return c.cardmarket?.prices?.trendPrice?.toFixed(2) ?? '' }
 function getMarketPrice(c: ApiCard) {
   const cm = c.cardmarket?.prices?.averageSellPrice
@@ -65,16 +63,17 @@ function getMarketPrice(c: ApiCard) {
 }
 
 async function searchTCGdex(query: string, signal?: AbortSignal): Promise<TCGdexCard[]> {
-  if (!query.trim() || query.trim().length < 2) return []
+  const q = query.trim()
+  if (q.length < 2) return []
   try {
-    const res = await fetch(`https://api.tcgdex.net/v2/fr/cards?name=${encodeURIComponent(query.trim())}`, { signal })
+    const res = await fetch(`https://api.tcgdex.net/v2/fr/cards?name=${encodeURIComponent(q)}`, { signal })
     if (!res.ok) return []
     const d = await res.json() as TCGdexCard[]
     return Array.isArray(d) ? d.slice(0, 20) : []
   } catch { return [] }
 }
 
-async function fetchPricesForTCGdexCard(tcgId: string): Promise<ApiCard | null> {
+async function fetchPrices(tcgId: string): Promise<ApiCard | null> {
   try {
     const res = await fetch(`https://api.pokemontcg.io/v2/cards/${tcgId}`, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) return null
@@ -83,10 +82,17 @@ async function fetchPricesForTCGdexCard(tcgId: string): Promise<ApiCard | null> 
   } catch { return null }
 }
 
-function cropAndScale(canvas: HTMLCanvasElement): HTMLCanvasElement {
+// ── OCR: crop the Pokémon name band (y: 6-18% of frame, center 55% width) ────
+// The name is BELOW the card type badge (BASE/Stage) and ABOVE the artwork.
+// On cards that fill the frame, this corresponds to roughly 8-18% of video height.
+// We skip y=0-6% to avoid reading the card-type badge and HP counter.
+function cropNameBand(canvas: HTMLCanvasElement): HTMLCanvasElement {
   const W = canvas.width, H = canvas.height
-  const sx = Math.floor(W * 0.25), sy = 0, sw = Math.floor(W * 0.50), sh = Math.floor(H * 0.22)
-  const SCALE = 4
+  const sx = Math.floor(W * 0.22)
+  const sy = Math.floor(H * 0.06)   // skip top 6% (card type badge area)
+  const sw = Math.floor(W * 0.56)
+  const sh = Math.floor(H * 0.13)   // read 6-19% height band
+  const SCALE = 5
   const out = document.createElement('canvas')
   out.width = sw * SCALE; out.height = sh * SCALE
   const ctx = out.getContext('2d')!
@@ -94,21 +100,32 @@ function cropAndScale(canvas: HTMLCanvasElement): HTMLCanvasElement {
   ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, out.width, out.height)
   const img = ctx.getImageData(0, 0, out.width, out.height), d = img.data
   for (let i = 0; i < d.length; i += 4) {
-    const g = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2]
-    const v = Math.min(255, Math.max(0, (g - 128) * 2.5 + 128))
-    d[i] = d[i+1] = d[i+2] = v; d[i+3] = 255
+    const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]
+    const v = Math.min(255, Math.max(0, (g - 128) * 2.8 + 128))
+    d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255
   }
   ctx.putImageData(img, 0, 0)
   return out
 }
 
-function extractName(raw: string): string {
-  return raw.replace(/\r?\n/g, ' ').replace(/[^a-zA-ZÀ-ÿ\s\-]/g, ' ')
-    .replace(/\s+/g, ' ').trim()
-    .split(' ').filter((w) => w.length >= 2 && /[a-zA-ZÀ-ÿ]/.test(w)).slice(0, 3).join(' ')
+// ── Filter OCR output: keep only plausible Pokémon names ─────────────────────
+// Rejects: lines that are mostly numbers, HP values ("PV 70"), type badges ("BASE", "STADE")
+const JUNK_WORDS = new Set(['base', 'stade', 'stade1', 'stade2', 'ex', 'gx', 'v', 'vmax', 'vstar', 'pv', 'hp', 'evolution', 'de'])
+
+function filterOcrResult(raw: string): string {
+  const line = raw.replace(/\r?\n/g, ' ').replace(/[^a-zA-ZÀ-ÿ\s\-]/g, ' ').replace(/\s+/g, ' ').trim()
+  const words = line.split(' ').filter((w) => {
+    if (w.length < 2) return false
+    if (!/[a-zA-ZÀ-ÿ]/.test(w)) return false
+    if (JUNK_WORDS.has(w.toLowerCase())) return false
+    return true
+  })
+  // Take up to first 3 words; must be ≥ 3 chars total
+  const result = words.slice(0, 3).join(' ')
+  return result.length >= 3 ? result : ''
 }
 
-// ── Component ──────────────────────────────────────────────────────────────────
+// ── Component ─────────────────────────────────────────────────────────────────
 type WorkerState = 'idle' | 'loading' | 'ready' | 'error'
 
 export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVintedFees = 0 }: Props) {
@@ -125,6 +142,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
   const searchAbort   = useRef<AbortController | null>(null)
   const lastOcrName   = useRef('')
   const savedUidsRef  = useRef<Set<string>>(new Set())
+  const inputRef      = useRef<HTMLInputElement>(null)
 
   const [zoom, setZoom]               = useState(ZOOM_DEFAULT)
   const [workerState, setWorkerState] = useState<WorkerState>('idle')
@@ -140,7 +158,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
   const [saving, setSaving]           = useState(false)
   const [savedUids, setSavedUids]     = useState<Set<string>>(new Set())
 
-  // ── Camera ─────────────────────────────────────────────────────────────────
+  // ── Camera ──────────────────────────────────────────────────────────────────
   async function applyZoom(val: number) {
     const clamped = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(val / ZOOM_STEP) * ZOOM_STEP))
     setZoom(clamped); zoomRef.current = clamped
@@ -164,7 +182,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
       const w = await createWorker('eng')
       await w.setParameters({
         tessedit_pageseg_mode: 7 as any,
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz -',
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz -À-ÿ',
       })
       if (!mountedRef.current) { await w.terminate(); return }
       workerRef.current = w
@@ -173,10 +191,9 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
     } catch { if (mountedRef.current) setWorkerState('error') }
   }
 
-  // ── Continuous scan ─────────────────────────────────────────────────────────
   function startScanLoop() {
     if (scanInterval.current) clearInterval(scanInterval.current)
-    scanInterval.current = setInterval(doScan, 2500)
+    scanInterval.current = setInterval(doScan, 2800)
     doScan()
   }
 
@@ -186,8 +203,8 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
     if (!video.videoWidth || !video.videoHeight) return
     isScanRef.current = true
     try {
-      canvas.width = video.videoWidth; canvas.height = video.videoHeight
-      // Apply digital zoom crop if using CSS zoom
+      canvas.width  = video.videoWidth
+      canvas.height = video.videoHeight
       const ctx = canvas.getContext('2d')!
       if (!nativeZoomRef.current && zoomRef.current > 1) {
         const z = zoomRef.current
@@ -198,13 +215,13 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
       } else {
         ctx.drawImage(video, 0, 0)
       }
-      const cropped = cropAndScale(canvas)
+      const cropped = cropNameBand(canvas)
       const { data } = await workerRef.current.recognize(cropped)
-      const name = extractName(data.text)
+      const name = filterOcrResult(data.text)
       if (!mountedRef.current) return
-      if (name.length >= 3) {
+      if (name) {
         setScanLabel(name)
-        if (name.toLowerCase() !== lastOcrName.current.toLowerCase()) {
+        if (name.toLowerCase() !== lastOcrName.current) {
           lastOcrName.current = name.toLowerCase()
           setQuery(name)
           triggerSearch(name)
@@ -212,8 +229,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
       } else {
         setScanLabel('')
       }
-    } catch { /* silent */ }
-    finally { isScanRef.current = false }
+    } catch { /* silent */ } finally { isScanRef.current = false }
   }
 
   function triggerSearch(q: string) {
@@ -225,7 +241,6 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
     }).catch(() => { if (mountedRef.current) setSearching(false) })
   }
 
-  // ── Manual search ───────────────────────────────────────────────────────────
   const handleQueryChange = useCallback((q: string) => {
     setQuery(q)
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -239,12 +254,11 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
     }, 350)
   }, [])
 
-  // ── Select result → add to detected list ────────────────────────────────────
   async function selectResult(tcgCard: TCGdexCard) {
     if (loadingCard === tcgCard.id) return
     setLoadingCard(tcgCard.id)
     try {
-      const apiCard = await fetchPricesForTCGdexCard(tcgCard.id)
+      const apiCard = await fetchPrices(tcgCard.id)
       const card: DetectedCard = {
         uid: `${tcgCard.id}-${Date.now()}`, apiId: tcgCard.id,
         name: apiCard?.name ?? tcgCard.name, nameFR: tcgCard.name,
@@ -252,7 +266,8 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
         setCode: apiCard?.set?.ptcgoCode ?? tcgCard.set?.id?.toUpperCase() ?? '',
         rarityFR: RARITY_MAP[apiCard?.rarity ?? ''] ?? apiCard?.rarity ?? '',
         imageUrl: apiCard?.images?.small ?? (tcgCard.image ? `${tcgCard.image}/low.webp` : ''),
-        marketPrice: apiCard ? getMarketPrice(apiCard) : '', cmTrend: apiCard ? getCMTrend(apiCard) : '',
+        marketPrice: apiCard ? getMarketPrice(apiCard) : '',
+        cmTrend: apiCard ? getCMTrend(apiCard) : '',
       }
       if (mountedRef.current) {
         setDetectedCards((prev) => prev.some((c) => c.apiId === card.apiId) ? prev : [card, ...prev])
@@ -261,30 +276,28 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
     } finally { if (mountedRef.current) setLoadingCard(null) }
   }
 
-  // ── Quick-add ───────────────────────────────────────────────────────────────
   async function handleQuickSave() {
     if (!quickAddCard) return
     setSaving(true)
     const price = quickPrice || quickAddCard.cmTrend || quickAddCard.marketPrice
-    const formData: ItemFormData = {
-      item_name: quickAddCard.nameFR || quickAddCard.name, purchase_price: price,
-      vinted_fees: String(defaultVintedFees), expected_sale_price: quickAddCard.cmTrend || quickAddCard.marketPrice,
-      location: quickLocation === 'CELIAN' ? 'Chez Célian' : 'Chez Romain', notes: '',
-      pokemon_name: quickAddCard.nameFR || quickAddCard.name, card_number: quickAddCard.number,
-      extension: quickAddCard.setName, rarity: quickAddCard.rarityFR,
-      pokemon_category: 'SINGLE', poke_location: quickLocation,
-      is_graded: false, grading_company: '', grading_note: '',
-      is_lot: false, lot_total_cost: '', nb_articles: '', funded_by: null, hits: [],
-    }
     try {
-      await onQuickAdd(formData)
+      await onQuickAdd({
+        item_name: quickAddCard.nameFR || quickAddCard.name, purchase_price: price,
+        vinted_fees: String(defaultVintedFees),
+        expected_sale_price: quickAddCard.cmTrend || quickAddCard.marketPrice,
+        location: quickLocation === 'CELIAN' ? 'Chez Célian' : 'Chez Romain', notes: '',
+        pokemon_name: quickAddCard.nameFR || quickAddCard.name,
+        card_number: quickAddCard.number, extension: quickAddCard.setName,
+        rarity: quickAddCard.rarityFR, pokemon_category: 'SINGLE', poke_location: quickLocation,
+        is_graded: false, grading_company: '', grading_note: '',
+        is_lot: false, lot_total_cost: '', nb_articles: '', funded_by: null, hits: [],
+      })
       const uid = quickAddCard.uid
       setSavedUids((prev) => { const n = new Set([...prev, uid]); savedUidsRef.current = n; return n })
       setQuickAddCard(null); setQuickPrice('')
     } finally { setSaving(false) }
   }
 
-  // ── Lifecycle ───────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!open) {
       streamRef.current?.getTracks().forEach((t) => t.stop()); streamRef.current = null
@@ -306,8 +319,11 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
       if (videoRef.current) videoRef.current.srcObject = stream
       const track = stream.getVideoTracks()[0]
       const cap = (track as any).getCapabilities?.() ?? {}
-      if (cap.zoom) { nativeZoomRef.current = true; track.applyConstraints({ advanced: [{ zoom: ZOOM_DEFAULT }] } as any).catch(() => {}) }
-    }).catch(() => { /* camera error handled by missing video */ })
+      if (cap.zoom) {
+        nativeZoomRef.current = true
+        track.applyConstraints({ advanced: [{ zoom: ZOOM_DEFAULT }] } as any).catch(() => {})
+      }
+    }).catch(() => {})
 
     initWorker()
 
@@ -323,230 +339,295 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
 
   if (!open) return null
 
-  const cssZoom = !nativeZoomRef.current && zoom > 1 ? { transform: `scale(${zoom})`, transformOrigin: 'center center' } as React.CSSProperties : {}
-  const zoomDots = Array.from({ length: Math.round((ZOOM_MAX - ZOOM_MIN) / ZOOM_STEP) + 1 }, (_, i) => ZOOM_MAX - i * ZOOM_STEP)
+  const cssZoom = !nativeZoomRef.current && zoom > 1
+    ? { transform: `scale(${zoom})`, transformOrigin: 'center center' } as React.CSSProperties
+    : {}
 
-  const frameColor = workerState === 'ready' ? 'rgba(52,211,153,0.7)' : 'rgba(255,255,255,0.3)'
-  const cornerColor = workerState === 'ready' ? 'rgba(52,211,153,0.9)' : 'rgba(255,255,255,0.4)'
+  const isReady   = workerState === 'ready'
+  const frameColor = isReady ? 'rgba(52,211,153,0.75)' : 'rgba(255,255,255,0.3)'
 
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-black select-none">
+    <div className="fixed inset-0 z-[70] flex flex-col bg-[#0a0a0a]" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
 
-      {/* Header */}
-      <div className="shrink-0 flex items-center justify-between px-5 h-12 bg-black/90 backdrop-blur border-b border-white/5 z-10">
-        <div className="flex items-center gap-2">
-          <Camera size={13} className="text-white/50" />
-          <span className="text-sm font-bold text-white tracking-wide">Scanner</span>
+      {/* ── Header ── */}
+      <div className="shrink-0 flex items-center justify-between px-5 h-14 bg-[#0a0a0a] border-b border-white/5">
+        <div className="flex items-center gap-2.5">
+          <ScanLine size={16} className={isReady ? 'text-emerald-400' : 'text-white/40'} />
+          <span className="text-[15px] font-bold text-white tracking-tight">Scanner</span>
           {detectedCards.length > 0 && (
-            <span className="ml-1 text-[10px] text-white/35 font-medium">· {detectedCards.length} carte{detectedCards.length > 1 ? 's' : ''}</span>
+            <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/25 text-[10px] text-emerald-400 font-bold">
+              {detectedCards.length}
+            </span>
           )}
         </div>
-        <button type="button" onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full text-white/50 hover:text-white hover:bg-white/10 transition-colors">
+        <button type="button" onClick={onClose}
+          className="w-9 h-9 flex items-center justify-center rounded-full bg-white/6 text-white/60 hover:text-white hover:bg-white/12 transition-colors">
           <X size={18} />
         </button>
       </div>
 
-      {/* Camera */}
-      <div className="flex-1 relative min-h-0 bg-black overflow-hidden">
+      {/* ── Camera — fixed height, mobile optimised ── */}
+      <div className="shrink-0 relative bg-black overflow-hidden" style={{ height: '42vh' }}>
         <video ref={videoRef} autoPlay playsInline muted
-          className="w-full h-full object-cover transition-transform duration-300" style={cssZoom} />
+          className="w-full h-full object-cover" style={cssZoom} />
+
+        {/* Subtle vignette */}
         <div className="absolute inset-0 pointer-events-none"
-          style={{ background: 'radial-gradient(ellipse 60% 72% at 50% 44%, transparent 28%, rgba(0,0,0,0.6) 100%)' }} />
+          style={{ background: 'radial-gradient(ellipse 65% 80% at 50% 50%, transparent 35%, rgba(0,0,0,0.55) 100%)' }} />
 
-        {/* Card frame */}
+        {/* Card frame — 58% width, centered */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="relative" style={{ width: '70%', aspectRatio: '5/7' }}>
-            <div className="absolute inset-0 rounded-2xl border-2 border-dashed" style={{ borderColor: frameColor }} />
-            {['top-0 left-0 border-t-[3px] border-l-[3px] rounded-tl-2xl', 'top-0 right-0 border-t-[3px] border-r-[3px] rounded-tr-2xl',
-              'bottom-0 left-0 border-b-[3px] border-l-[3px] rounded-bl-2xl', 'bottom-0 right-0 border-b-[3px] border-r-[3px] rounded-br-2xl',
+          <div className="relative" style={{ width: '58%', aspectRatio: '5/7' }}>
+            <div className="absolute inset-0 rounded-xl" style={{ border: `2px dashed ${frameColor}` }} />
+            {[
+              'top-0 left-0 rounded-tl-xl border-t-[3px] border-l-[3px]',
+              'top-0 right-0 rounded-tr-xl border-t-[3px] border-r-[3px]',
+              'bottom-0 left-0 rounded-bl-xl border-b-[3px] border-l-[3px]',
+              'bottom-0 right-0 rounded-br-xl border-b-[3px] border-r-[3px]',
             ].map((cls) => (
-              <div key={cls} className={`absolute w-7 h-7 ${cls}`} style={{ borderColor: cornerColor, margin: '-2px' }} />
+              <div key={cls} className={`absolute w-6 h-6 ${cls}`}
+                style={{ borderColor: frameColor, margin: '-2px' }} />
             ))}
-            {/* Name zone */}
-            <div className="absolute top-0 inset-x-0 h-[16%] rounded-t-2xl"
-              style={{ background: workerState === 'ready' ? 'rgba(52,211,153,0.1)' : 'rgba(255,255,255,0.04)',
-                borderBottom: `1px solid ${workerState === 'ready' ? 'rgba(52,211,153,0.3)' : 'rgba(255,255,255,0.1)'}` }} />
+            {/* Name zone highlight — where the OCR reads */}
+            <div className="absolute inset-x-0 rounded-t-xl"
+              style={{
+                top: '6%', height: '13%',
+                background: isReady ? 'rgba(52,211,153,0.08)' : 'transparent',
+                borderTop: isReady ? '1px dashed rgba(52,211,153,0.4)' : 'none',
+                borderBottom: isReady ? '1px dashed rgba(52,211,153,0.4)' : 'none',
+              }} />
           </div>
         </div>
 
-        {/* Scan status badge */}
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
+        {/* Scan state badge — top center */}
+        <div className="absolute top-3 inset-x-0 flex justify-center pointer-events-none">
           {workerState === 'loading' && (
-            <div className="flex items-center gap-1.5 bg-black/70 backdrop-blur px-3 py-1.5 rounded-full">
+            <div className="flex items-center gap-2 bg-black/65 backdrop-blur-sm px-3.5 py-1.5 rounded-full border border-amber-500/20">
               <Loader2 size={10} className="animate-spin text-amber-400" />
-              <span className="text-[10px] text-amber-300 font-medium whitespace-nowrap">Chargement scanner (~15s)…</span>
+              <span className="text-[11px] text-amber-300 font-semibold">Chargement scanner…</span>
             </div>
           )}
-          {workerState === 'ready' && scanLabel && (
-            <div className="flex items-center gap-1.5 bg-black/70 backdrop-blur px-3 py-1.5 rounded-full border border-emerald-500/30">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-[10px] text-emerald-300 font-medium whitespace-nowrap">"{scanLabel}"</span>
+          {isReady && scanLabel && (
+            <div className="flex items-center gap-2 bg-black/65 backdrop-blur-sm px-3.5 py-1.5 rounded-full border border-emerald-500/25">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+              <span className="text-[11px] text-emerald-300 font-semibold max-w-[200px] truncate">"{scanLabel}"</span>
             </div>
           )}
-          {workerState === 'ready' && !scanLabel && (
-            <div className="flex items-center gap-1.5 bg-black/70 backdrop-blur px-3 py-1.5 rounded-full">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-[10px] text-white/60 font-medium whitespace-nowrap">Scan actif — pointez la carte</span>
+          {isReady && !scanLabel && (
+            <div className="flex items-center gap-2 bg-black/65 backdrop-blur-sm px-3.5 py-1.5 rounded-full">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+              <span className="text-[11px] text-white/50 font-medium">Scan actif</span>
             </div>
           )}
         </div>
 
-        {/* Zoom controls */}
-        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col items-center gap-2.5 z-10">
+        {/* Zoom controls — right side, compact */}
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col items-center gap-2 z-10">
           <button type="button" onClick={() => applyZoom(zoom + ZOOM_STEP)} disabled={zoom >= ZOOM_MAX}
-            className="w-9 h-9 rounded-full bg-black/60 border border-white/18 text-white flex items-center justify-center disabled:opacity-25 backdrop-blur-sm active:scale-95 transition-transform">
-            <Plus size={15} />
+            className="w-8 h-8 rounded-full bg-black/55 border border-white/15 text-white flex items-center justify-center disabled:opacity-20 active:scale-90 transition-transform">
+            <Plus size={14} />
           </button>
-          <div className="flex flex-col items-center gap-[5px] py-0.5">
-            {zoomDots.map((v) => (
-              <button key={v} type="button" onClick={() => applyZoom(v)}
-                className={`rounded-full transition-all ${Math.abs(zoom - v) < 0.01 ? 'w-2.5 h-2.5 bg-white shadow-[0_0_6px_rgba(255,255,255,0.6)]' : 'w-1.5 h-1.5 bg-white/28 hover:bg-white/55'}`} />
-            ))}
-          </div>
-          <span className="text-[10px] font-bold text-white/65 font-mono bg-black/55 px-1.5 py-0.5 rounded-md backdrop-blur-sm">×{zoom.toFixed(1)}</span>
+          <span className="text-[10px] font-bold text-white/55 font-mono bg-black/55 px-1.5 py-0.5 rounded-md">
+            ×{zoom.toFixed(1)}
+          </span>
           <button type="button" onClick={() => applyZoom(zoom - ZOOM_STEP)} disabled={zoom <= ZOOM_MIN}
-            className="w-9 h-9 rounded-full bg-black/60 border border-white/18 text-white flex items-center justify-center disabled:opacity-25 backdrop-blur-sm active:scale-95 transition-transform">
-            <Minus size={15} />
+            className="w-8 h-8 rounded-full bg-black/55 border border-white/15 text-white flex items-center justify-center disabled:opacity-20 active:scale-90 transition-transform">
+            <Minus size={14} />
           </button>
         </div>
       </div>
 
-      {/* Bottom sheet */}
-      <div className="shrink-0 bg-[#080809] border-t border-white/6 flex flex-col relative" style={{ height: 300 }}>
+      {/* ── Bottom panel — search + results ── */}
+      <div className="flex-1 flex flex-col min-h-0 bg-[#0e0e10]">
 
         {/* Search bar */}
-        <div className="px-4 pt-3 pb-2 border-b border-white/5 shrink-0">
+        <div className="shrink-0 px-4 pt-3 pb-2">
           <div className="relative">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/35 pointer-events-none" />
-            <input type="text" value={query} onChange={(e) => handleQueryChange(e.target.value)}
-              placeholder="Nom de la carte (Dracaufeu, Pikachu ex…)"
-              className="w-full bg-white/6 border border-white/10 rounded-xl pl-8 pr-8 py-2.5 text-sm text-white placeholder-white/25 focus:outline-none focus:border-white/28 transition-colors"
-              autoComplete="off" autoCorrect="off" spellCheck={false} />
-            {(searching || loadingCard) && <Loader2 size={13} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-white/35" />}
+            <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
+            <input
+              ref={inputRef}
+              type="text" value={query}
+              onChange={(e) => handleQueryChange(e.target.value)}
+              placeholder="Chipie, Dracaufeu ex, Pikachu…"
+              className="w-full bg-white/7 border border-white/10 rounded-2xl pl-9 pr-9 py-3.5 text-[15px] text-white placeholder-white/20 focus:outline-none focus:border-emerald-500/40 focus:bg-white/9 transition-all"
+              autoComplete="off" autoCorrect="off" spellCheck={false}
+            />
+            {query ? (
+              <button type="button" onClick={() => { setQuery(''); setSearchResults([]) }}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/25 hover:text-white/60 transition-colors p-1">
+                <X size={13} />
+              </button>
+            ) : (searching || loadingCard) ? (
+              <Loader2 size={13} className="absolute right-3.5 top-1/2 -translate-y-1/2 animate-spin text-white/30" />
+            ) : null}
           </div>
-
-          {/* Search results dropdown */}
-          {searchResults.length > 0 && (
-            <div className="mt-2 bg-[#0d0d10] border border-white/8 rounded-xl overflow-hidden max-h-40 overflow-y-auto">
-              <div className="divide-y divide-white/4">
-                {searchResults.map((c) => (
-                  <button key={c.id} type="button" onClick={() => selectResult(c)} disabled={loadingCard === c.id}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/6 text-left transition-colors">
-                    <div className="w-7 h-10 rounded-md overflow-hidden bg-zinc-900 border border-white/6 shrink-0">
-                      {c.image ? <img src={`${c.image}/low.webp`} alt={c.name} className="w-full h-full object-cover" />
-                        : <div className="w-full h-full flex items-center justify-center"><Camera size={10} className="text-white/20" /></div>}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-semibold text-white truncate">{c.name}</p>
-                      <p className="text-[10px] text-white/35 font-mono mt-0.5">{c.set?.id?.toUpperCase()} {c.localId}</p>
-                    </div>
-                    {loadingCard === c.id ? <Loader2 size={13} className="animate-spin text-white/40 shrink-0" />
-                      : <Plus size={13} className="text-white/40 shrink-0" />}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Detected cards */}
-        <div className="flex-1 overflow-y-auto">
-          {detectedCards.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full gap-2 px-6 text-center">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <p className="text-[11px] text-white/25 leading-relaxed">
-                {workerState === 'loading' ? 'Chargement scanner (~15s la première fois)…' :
-                 workerState === 'ready' ? 'Pointez la carte dans le cadre ou tapez son nom' :
-                 'Tapez le nom d\'une carte pour la trouver'}
+        {/* Results or detected cards — scrollable */}
+        <div className="flex-1 overflow-y-auto overscroll-contain">
+
+          {/* Search results */}
+          {searchResults.length > 0 && (
+            <div className="px-4 pb-2 space-y-1">
+              <p className="text-[10px] font-semibold text-white/25 uppercase tracking-widest px-1 pb-1">
+                {searchResults.length} résultat{searchResults.length > 1 ? 's' : ''} — appuyez pour ajouter
               </p>
+              {searchResults.map((c) => (
+                <button key={c.id} type="button" onClick={() => selectResult(c)} disabled={loadingCard === c.id}
+                  className="w-full flex items-center gap-3.5 px-3.5 py-3 bg-white/4 hover:bg-white/8 active:bg-white/12 rounded-2xl border border-white/6 text-left transition-colors active:scale-[0.99]">
+                  <div className="w-10 h-[56px] rounded-xl overflow-hidden bg-zinc-900 border border-white/6 shrink-0">
+                    {c.image
+                      ? <img src={`${c.image}/low.webp`} alt={c.name} className="w-full h-full object-cover" />
+                      : <div className="w-full h-full flex items-center justify-center"><Camera size={11} className="text-white/15" /></div>}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[14px] font-bold text-white truncate leading-tight">{c.name}</p>
+                    <p className="text-[11px] text-white/35 font-mono mt-0.5">{c.set?.id?.toUpperCase()} · {c.localId}</p>
+                    {c.set?.name && <p className="text-[10px] text-white/20 mt-0.5 truncate">{c.set.name}</p>}
+                  </div>
+                  {loadingCard === c.id
+                    ? <Loader2 size={16} className="animate-spin text-white/35 shrink-0" />
+                    : <div className="w-8 h-8 rounded-full bg-white/8 flex items-center justify-center shrink-0"><Plus size={14} className="text-white/60" /></div>}
+                </button>
+              ))}
             </div>
-          ) : (
-            <div className="divide-y divide-white/4">
+          )}
+
+          {/* No results hint */}
+          {!searching && query.trim().length >= 2 && searchResults.length === 0 && (
+            <p className="text-center text-[12px] text-white/25 py-6 px-8">
+              Aucune carte pour « {query} »<br />
+              <span className="text-white/15">Vérifiez l'orthographe du nom français</span>
+            </p>
+          )}
+
+          {/* Detected cards (added to list, not yet quick-added) */}
+          {detectedCards.length > 0 && searchResults.length === 0 && (
+            <div className="px-4 pb-4 space-y-1">
+              <p className="text-[10px] font-semibold text-white/25 uppercase tracking-widest px-1 pb-1">
+                Cartes en attente ({detectedCards.length})
+              </p>
               {detectedCards.map((card) => {
                 const isSaved = savedUids.has(card.uid)
                 const price   = card.cmTrend || card.marketPrice
                 return (
-                  <div key={card.uid} className={`flex items-center gap-3 px-4 py-2.5 ${isSaved ? 'bg-emerald-500/4' : ''}`}>
-                    <div className="w-9 h-[52px] rounded-lg overflow-hidden bg-zinc-900/80 border border-white/6 shrink-0">
-                      {card.imageUrl ? <img src={card.imageUrl} alt={card.nameFR || card.name} className="w-full h-full object-cover" />
-                        : <div className="w-full h-full flex items-center justify-center"><Camera size={12} className="text-white/15" /></div>}
+                  <div key={card.uid}
+                    className={`flex items-center gap-3.5 px-3.5 py-3 rounded-2xl border transition-colors ${isSaved ? 'bg-emerald-500/5 border-emerald-500/15' : 'bg-white/4 border-white/6'}`}>
+                    <div className="w-10 h-[56px] rounded-xl overflow-hidden bg-zinc-900 border border-white/6 shrink-0">
+                      {card.imageUrl
+                        ? <img src={card.imageUrl} alt={card.nameFR} className="w-full h-full object-cover" />
+                        : <div className="w-full h-full flex items-center justify-center"><Camera size={11} className="text-white/15" /></div>}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className={`text-[13px] font-semibold truncate leading-tight ${isSaved ? 'text-emerald-400' : 'text-white'}`}>{card.nameFR || card.name}</p>
-                      <p className="text-[10px] text-white/35 mt-0.5 font-mono">{card.setCode} {card.number}</p>
+                      <p className={`text-[14px] font-bold truncate leading-tight ${isSaved ? 'text-emerald-400' : 'text-white'}`}>
+                        {card.nameFR || card.name}
+                      </p>
+                      <p className="text-[11px] text-white/35 font-mono mt-0.5">{card.setCode} · {card.number}</p>
+                      {card.rarityFR && <p className="text-[10px] text-white/20 mt-0.5">{card.rarityFR}</p>}
                     </div>
-                    <span className={`text-[13px] font-bold shrink-0 ${price ? 'text-emerald-400' : 'text-white/20'}`}>{price ? `${price}€` : '—'}</span>
-                    {isSaved ? (
-                      <div className="w-8 h-8 flex items-center justify-center rounded-full bg-emerald-500/12 shrink-0"><CheckCircle2 size={14} className="text-emerald-400" /></div>
-                    ) : (
-                      <button type="button" onClick={() => { setQuickAddCard(card); setQuickPrice(card.cmTrend || card.marketPrice); setQuickLocation('CELIAN') }}
-                        className="w-8 h-8 flex items-center justify-center rounded-full bg-white text-black hover:bg-white/90 active:scale-95 transition-all shrink-0">
-                        <Plus size={14} />
-                      </button>
-                    )}
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      {price && <span className="text-[14px] font-bold text-emerald-400">{price}€</span>}
+                      {isSaved
+                        ? <CheckCircle2 size={20} className="text-emerald-400" />
+                        : <button type="button"
+                            onClick={() => { setQuickAddCard(card); setQuickPrice(card.cmTrend || card.marketPrice); setQuickLocation('CELIAN') }}
+                            className="w-9 h-9 flex items-center justify-center rounded-full bg-white text-black active:scale-90 transition-transform">
+                            <Plus size={16} />
+                          </button>}
+                    </div>
                   </div>
                 )
               })}
             </div>
           )}
-        </div>
 
-        {/* Quick-add panel */}
-        {quickAddCard && (
-          <div className="absolute inset-0 bg-[#0d0d10] border-t border-white/6 flex flex-col z-10">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 shrink-0">
-              <span className="text-xs font-bold text-white">Ajouter au stock</span>
-              <button type="button" onClick={() => setQuickAddCard(null)} className="text-white/35 hover:text-white transition-colors"><X size={16} /></button>
+          {/* Empty state */}
+          {detectedCards.length === 0 && searchResults.length === 0 && !query && (
+            <div className="flex flex-col items-center justify-center h-full gap-3 px-8 py-8 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-white/4 border border-white/6 flex items-center justify-center">
+                <ScanLine size={20} className="text-white/20" />
+              </div>
+              <p className="text-[13px] text-white/30 leading-relaxed">
+                {workerState === 'loading'
+                  ? 'Chargement (~15s la première fois)…'
+                  : 'Pointez le nom de la carte dans le cadre vert, ou tapez-le ci-dessus'}
+              </p>
             </div>
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-[56px] rounded-lg overflow-hidden bg-zinc-900 border border-white/6 shrink-0">
-                  {quickAddCard.imageUrl && <img src={quickAddCard.imageUrl} alt="" className="w-full h-full object-cover" />}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-white truncate">{quickAddCard.nameFR || quickAddCard.name}</p>
-                  <p className="text-[10px] text-white/35 mt-0.5 font-mono">{quickAddCard.setCode} {quickAddCard.number}</p>
-                  <p className="text-[10px] text-white/25">{quickAddCard.rarityFR}</p>
-                </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Quick-add overlay ── */}
+      {quickAddCard && (
+        <div className="absolute inset-0 z-20 bg-[#0e0e10] flex flex-col" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+          <div className="flex items-center justify-between px-5 h-14 border-b border-white/5 shrink-0">
+            <span className="text-[15px] font-bold text-white">Ajouter au stock</span>
+            <button type="button" onClick={() => setQuickAddCard(null)}
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-white/6 text-white/60 hover:text-white transition-colors"><X size={18} /></button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+            {/* Card preview */}
+            <div className="flex items-center gap-4 p-4 bg-white/4 rounded-2xl border border-white/6">
+              <div className="w-14 h-[78px] rounded-xl overflow-hidden bg-zinc-900 border border-white/8 shrink-0">
+                {quickAddCard.imageUrl && <img src={quickAddCard.imageUrl} alt="" className="w-full h-full object-cover" />}
               </div>
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-medium text-white/35">Prix d&apos;achat</label>
-                <div className="relative">
-                  <input type="number" step="0.01" min="0"
-                    placeholder={quickAddCard.cmTrend || quickAddCard.marketPrice || '0.00'}
-                    value={quickPrice} onChange={(e) => setQuickPrice(e.target.value)} autoFocus
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 pr-8 text-sm text-white placeholder-white/18 focus:outline-none focus:border-white/28 transition-colors" />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/28">€</span>
-                </div>
-                {(quickAddCard.cmTrend || quickAddCard.marketPrice) && (
-                  <button type="button" onClick={() => setQuickPrice(quickAddCard.cmTrend || quickAddCard.marketPrice)}
-                    className="text-[11px] text-left text-white/28 hover:text-emerald-400 transition-colors">
-                    CM Trend : <span className="text-emerald-400 font-semibold">{quickAddCard.cmTrend || quickAddCard.marketPrice}€</span>
-                  </button>
-                )}
+              <div className="min-w-0 flex-1">
+                <p className="text-[16px] font-bold text-white truncate">{quickAddCard.nameFR || quickAddCard.name}</p>
+                <p className="text-[12px] text-white/40 font-mono mt-1">{quickAddCard.setCode} · {quickAddCard.number}</p>
+                <p className="text-[11px] text-white/25 mt-0.5">{quickAddCard.rarityFR}</p>
               </div>
-              <div className="flex gap-2">
+            </div>
+
+            {/* Price */}
+            <div className="space-y-2">
+              <label className="text-[12px] font-semibold text-white/40 uppercase tracking-wider">Prix d&apos;achat</label>
+              <div className="relative">
+                <input type="number" step="0.01" min="0"
+                  placeholder={quickAddCard.cmTrend || quickAddCard.marketPrice || '0.00'}
+                  value={quickPrice} onChange={(e) => setQuickPrice(e.target.value)} autoFocus
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-4 pr-10 text-[18px] font-bold text-white placeholder-white/15 focus:outline-none focus:border-emerald-500/40 transition-all" />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[15px] text-white/25 font-bold">€</span>
+              </div>
+              {(quickAddCard.cmTrend || quickAddCard.marketPrice) && (
+                <button type="button"
+                  onClick={() => setQuickPrice(quickAddCard.cmTrend || quickAddCard.marketPrice)}
+                  className="text-[12px] text-white/30 hover:text-emerald-400 transition-colors">
+                  CM Trend : <span className="text-emerald-400 font-bold">{quickAddCard.cmTrend || quickAddCard.marketPrice}€</span> — appuyer pour remplir
+                </button>
+              )}
+            </div>
+
+            {/* Location */}
+            <div className="space-y-2">
+              <label className="text-[12px] font-semibold text-white/40 uppercase tracking-wider">Stockée chez</label>
+              <div className="grid grid-cols-2 gap-3">
                 {(['CELIAN', 'ROMAIN'] as const).map((loc) => (
                   <button key={loc} type="button" onClick={() => setQuickLocation(loc)}
-                    className={`flex-1 py-2 rounded-xl text-xs font-semibold border transition-all ${quickLocation === loc ? 'bg-white/10 border-white/25 text-white' : 'border-white/6 text-white/28 hover:text-white/55'}`}>
+                    className={`py-3.5 rounded-2xl text-[14px] font-bold border transition-all ${
+                      quickLocation === loc ? 'bg-white text-black border-white' : 'border-white/10 text-white/40 hover:text-white/70 hover:border-white/20'
+                    }`}>
                     {loc === 'CELIAN' ? 'Célian' : 'Romain'}
                   </button>
                 ))}
               </div>
             </div>
-            <div className="flex gap-2 px-4 pb-4 pt-2 shrink-0">
-              <button type="button" onClick={() => setQuickAddCard(null)}
-                className="flex-1 py-2.5 rounded-xl border border-white/8 text-sm text-white/35 hover:text-white transition-colors">Retour</button>
-              <button type="button" onClick={handleQuickSave}
-                disabled={saving || (!quickPrice && !quickAddCard.cmTrend && !quickAddCard.marketPrice)}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white text-black font-bold text-sm hover:bg-white/92 disabled:opacity-35 active:scale-[0.98] transition-all">
-                {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                Ajouter
-              </button>
-            </div>
           </div>
-        )}
-      </div>
+
+          {/* Actions */}
+          <div className="shrink-0 px-5 pb-5 pt-3 flex gap-3 border-t border-white/5">
+            <button type="button" onClick={() => setQuickAddCard(null)}
+              className="flex-1 py-4 rounded-2xl border border-white/8 text-[15px] text-white/40 font-semibold hover:text-white hover:border-white/20 transition-colors">
+              Retour
+            </button>
+            <button type="button" onClick={handleQuickSave}
+              disabled={saving}
+              className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 disabled:opacity-40 text-black font-bold text-[15px] transition-all active:scale-[0.98]">
+              {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+              Ajouter au stock
+            </button>
+          </div>
+        </div>
+      )}
 
       <canvas ref={canvasRef} className="hidden" />
     </div>
