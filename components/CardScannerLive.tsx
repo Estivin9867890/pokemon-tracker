@@ -83,7 +83,7 @@ async function fetchPrices(tcgId: string): Promise<ApiCard | null> {
 
 // ── Capture & resize canvas to JPEG base64 (small for Gemini) ─────────────────
 function captureToBase64(video: HTMLVideoElement): string {
-  const TARGET_W = 800
+  const TARGET_W = 1280
   const ratio    = TARGET_W / video.videoWidth
   const canvas   = document.createElement('canvas')
   canvas.width   = TARGET_W
@@ -105,9 +105,11 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
   const [zoom, setZoom]               = useState(ZOOM_DEFAULT)
   const [cameraReady, setCameraReady] = useState(false)
 
-  const [scanning, setScanning]       = useState(false)   // Gemini IA scan in progress
+  const [scanning, setScanning]       = useState(false)
   const [scanError, setScanError]     = useState('')
-  const [scanResult, setScanResult]   = useState('')      // name found by Gemini
+  const [scanResult, setScanResult]   = useState('')
+  const [scanNumber, setScanNumber]   = useState('')
+  const [scanned, setScanned]         = useState(false)
 
   const [query, setQuery]             = useState('')
   const [searching, setSearching]     = useState(false)
@@ -138,7 +140,8 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
   // ── Gemini AI scan ──────────────────────────────────────────────────────────
   async function handleAiScan() {
     if (!videoRef.current || scanning) return
-    setScanning(true); setScanError(''); setScanResult(''); setSearchResults([])
+    setScanning(true); setScanError(''); setScanResult(''); setScanNumber('')
+    setSearchResults([])
 
     try {
       const base64 = captureToBase64(videoRef.current)
@@ -162,11 +165,46 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
       }
 
       const name = (data.name ?? '').trim()
+      const number = (data.number ?? '').trim()
       if (!name) { setScanError('Carte non reconnue — repositionnez ou tapez le nom'); return }
 
       setScanResult(name)
+      setScanNumber(number)
       setQuery(name)
-      triggerSearch(name)
+      setScanned(true)
+
+      searchAbort.current?.abort()
+      const ctrl = new AbortController(); searchAbort.current = ctrl
+      const cards = await searchTCGdex(name, ctrl.signal)
+      if (!mountedRef.current || ctrl.signal.aborted) return
+
+      if (number && cards.length > 0) {
+        const num = number.split('/')[0].replace(/^0+/, '') || '0'
+        const match = cards.find(c => c.localId.replace(/^0+/, '') === num)
+        if (match) {
+          setLoadingCard(match.id)
+          try {
+            const api = await fetchPrices(match.id)
+            const card: DetectedCard = {
+              uid: `${match.id}-${Date.now()}`, apiId: match.id,
+              name: api?.name ?? match.name, nameFR: match.name,
+              number: match.localId, setName: match.set?.name ?? api?.set?.name ?? '',
+              setCode: api?.set?.ptcgoCode ?? match.set?.id?.toUpperCase() ?? '',
+              rarityFR: RARITY_MAP[api?.rarity ?? ''] ?? api?.rarity ?? '',
+              imageUrl: api?.images?.small ?? (match.image ? `${match.image}/low.webp` : ''),
+              marketPrice: api ? getMarketPrice(api) : '', cmTrend: api ? getCMTrend(api) : '',
+            }
+            if (mountedRef.current) {
+              setDetectedCards(prev => prev.some(c => c.apiId === card.apiId) ? prev : [card, ...prev])
+              setQuickAddCard(card)
+              setQuickPrice(card.cmTrend || card.marketPrice)
+            }
+          } finally { if (mountedRef.current) setLoadingCard(null) }
+          return
+        }
+      }
+
+      setSearchResults(cards)
     } catch (err) {
       if (mountedRef.current) setScanError((err as Error).message ?? 'Erreur réseau')
     } finally {
@@ -248,8 +286,8 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
       return
     }
     mountedRef.current = true
-    setCameraReady(false); setScanning(false); setScanError(''); setScanResult('')
-    setQuery(''); setSearchResults([]); setDetectedCards([])
+    setCameraReady(false); setScanning(false); setScanError(''); setScanResult(''); setScanNumber('')
+    setScanned(false); setQuery(''); setSearchResults([]); setDetectedCards([])
     setQuickAddCard(null); setSavedUids(new Set())
     setZoom(ZOOM_DEFAULT); zoomRef.current = ZOOM_DEFAULT; nativeRef.current = false
 
@@ -300,7 +338,8 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
       </div>
 
       {/* Camera */}
-      <div className="shrink-0 relative bg-black overflow-hidden" style={{ height: '50vh' }}>
+      <div className="shrink-0 relative bg-black overflow-hidden"
+        style={{ height: scanned ? '25vh' : '50vh', transition: 'height 0.3s ease-out' }}>
         <video ref={videoRef} autoPlay playsInline muted
           className="w-full h-full object-cover" style={cssZoom} />
 
@@ -381,7 +420,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
           {/* Feedback: result or error */}
           {scanResult && !searching && (
             <p className="text-center text-[12px] text-emerald-400 font-medium">
-              ✓ Détecté : « {scanResult} »
+              ✓ Détecté : « {scanResult} »{scanNumber ? ` · ${scanNumber}` : ''}
             </p>
           )}
           {scanError && (
