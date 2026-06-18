@@ -2,7 +2,7 @@
 
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { X, Plus, CheckCircle2, Loader2, Camera, Minus, Search, ScanLine, Zap } from 'lucide-react'
-import { ItemFormData } from '@/types'
+import { ItemFormData, FundedBy, GRADING_COMPANIES } from '@/types'
 
 export interface DetectedCard {
   uid: string; apiId: string; name: string; nameFR: string
@@ -120,7 +120,17 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
 
   const [quickAddCard, setQuickAddCard] = useState<DetectedCard | null>(null)
   const [quickPrice, setQuickPrice]   = useState('')
+  const [quickExpectedPrice, setQuickExpectedPrice] = useState('')
   const [quickLocation, setQuickLocation] = useState<'CELIAN' | 'ROMAIN'>('CELIAN')
+  const [quickCategory, setQuickCategory] = useState<'SINGLE' | 'SEALED'>('SINGLE')
+  const [quickFundedBy, setQuickFundedBy] = useState<FundedBy | null>(null)
+  const [quickIsGraded, setQuickIsGraded] = useState(false)
+  const [quickGradingCompany, setQuickGradingCompany] = useState('')
+  const [quickGradingNote, setQuickGradingNote] = useState('')
+  const [quickNotes, setQuickNotes]   = useState('')
+  const [quickIsLot, setQuickIsLot]   = useState(false)
+  const [quickLotCost, setQuickLotCost] = useState('')
+  const [quickLotNb, setQuickLotNb]   = useState('')
   const [saving, setSaving]           = useState(false)
   const [savedUids, setSavedUids]     = useState<Set<string>>(new Set())
 
@@ -196,8 +206,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
             }
             if (mountedRef.current) {
               setDetectedCards(prev => prev.some(c => c.apiId === card.apiId) ? prev : [card, ...prev])
-              setQuickAddCard(card)
-              setQuickPrice(card.cmTrend || card.marketPrice)
+              openQuickAdd(card)
             }
           } finally { if (mountedRef.current) setLoadingCard(null) }
           return
@@ -258,21 +267,41 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
   }
 
   // ── Quick-add ────────────────────────────────────────────────────────────────
+  function openQuickAdd(card: DetectedCard) {
+    setQuickAddCard(card)
+    setQuickPrice(card.cmTrend || card.marketPrice)
+    setQuickExpectedPrice(card.cmTrend || card.marketPrice)
+    setQuickLocation('CELIAN')
+    setQuickCategory('SINGLE')
+    setQuickFundedBy(null)
+    setQuickIsGraded(false)
+    setQuickGradingCompany('')
+    setQuickGradingNote('')
+    setQuickNotes('')
+    setQuickIsLot(false)
+    setQuickLotCost('')
+    setQuickLotNb('')
+  }
+
   async function handleQuickSave() {
     if (!quickAddCard) return
     setSaving(true)
-    const price = quickPrice || quickAddCard.cmTrend || quickAddCard.marketPrice
+    const name = quickAddCard.nameFR || quickAddCard.name
+    const price = quickIsLot ? '' : (quickPrice || quickAddCard.cmTrend || quickAddCard.marketPrice)
     try {
       await onQuickAdd({
-        item_name: quickAddCard.nameFR || quickAddCard.name, purchase_price: price,
+        item_name: name, purchase_price: price,
         vinted_fees: String(defaultVintedFees),
-        expected_sale_price: quickAddCard.cmTrend || quickAddCard.marketPrice,
-        location: quickLocation === 'CELIAN' ? 'Chez Célian' : 'Chez Romain', notes: '',
-        pokemon_name: quickAddCard.nameFR || quickAddCard.name,
+        expected_sale_price: quickExpectedPrice || quickAddCard.cmTrend || quickAddCard.marketPrice,
+        location: quickLocation === 'CELIAN' ? 'Chez Célian' : 'Chez Romain',
+        notes: quickNotes,
+        pokemon_name: name,
         card_number: quickAddCard.number, extension: quickAddCard.setName,
-        rarity: quickAddCard.rarityFR, pokemon_category: 'SINGLE', poke_location: quickLocation,
-        is_graded: false, grading_company: '', grading_note: '',
-        is_lot: false, lot_total_cost: '', nb_articles: '', funded_by: null, hits: [],
+        rarity: quickAddCard.rarityFR, pokemon_category: quickCategory,
+        poke_location: quickLocation,
+        is_graded: quickIsGraded, grading_company: quickGradingCompany, grading_note: quickGradingNote,
+        is_lot: quickIsLot, lot_total_cost: quickLotCost, nb_articles: quickLotNb,
+        funded_by: quickFundedBy, hits: [],
       })
       setSavedUids((prev) => new Set([...prev, quickAddCard.uid]))
       setQuickAddCard(null); setQuickPrice('')
@@ -520,7 +549,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
                       {isSaved
                         ? <CheckCircle2 size={20} className="text-emerald-400" />
                         : <button type="button"
-                            onClick={() => { setQuickAddCard(card); setQuickPrice(card.cmTrend || card.marketPrice); setQuickLocation('CELIAN') }}
+                            onClick={() => openQuickAdd(card)}
                             className="w-9 h-9 flex items-center justify-center rounded-full bg-white text-black active:scale-90 transition-transform">
                             <Plus size={16} />
                           </button>}
@@ -555,7 +584,8 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
             <button type="button" onClick={() => setQuickAddCard(null)}
               className="w-9 h-9 flex items-center justify-center rounded-full bg-white/6 text-white/60 hover:text-white transition-colors"><X size={18} /></button>
           </div>
-          <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+          <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
+            {/* Card preview */}
             <div className="flex items-center gap-4 p-4 bg-white/4 rounded-2xl border border-white/6">
               <div className="w-14 h-[78px] rounded-xl overflow-hidden bg-zinc-900 border border-white/8 shrink-0">
                 {quickAddCard.imageUrl && <img src={quickAddCard.imageUrl} alt="" className="w-full h-full object-cover" />}
@@ -567,33 +597,157 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-[12px] font-semibold text-white/35 uppercase tracking-wider">Prix d&apos;achat</label>
-              <div className="relative">
-                <input type="number" step="0.01" min="0"
-                  placeholder={quickAddCard.cmTrend || quickAddCard.marketPrice || '0.00'}
-                  value={quickPrice} onChange={(e) => setQuickPrice(e.target.value)} autoFocus
-                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-4 pr-10 text-[20px] font-bold text-white placeholder-white/15 focus:outline-none focus:border-emerald-500/40 transition-all" />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[16px] text-white/25 font-bold">€</span>
+            {/* Prix d'achat (masqué si lot) */}
+            {!quickIsLot && (
+              <div className="space-y-1.5">
+                <label className="text-[12px] font-semibold text-white/35 uppercase tracking-wider">Prix d&apos;achat</label>
+                <div className="relative">
+                  <input type="number" step="0.01" min="0"
+                    placeholder={quickAddCard.cmTrend || quickAddCard.marketPrice || '0.00'}
+                    value={quickPrice} onChange={(e) => setQuickPrice(e.target.value)} autoFocus
+                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3.5 pr-10 text-[18px] font-bold text-white placeholder-white/15 focus:outline-none focus:border-emerald-500/40 transition-all" />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[14px] text-white/25 font-bold">€</span>
+                </div>
+                {(quickAddCard.cmTrend || quickAddCard.marketPrice) && (
+                  <button type="button" onClick={() => setQuickPrice(quickAddCard.cmTrend || quickAddCard.marketPrice)}
+                    className="text-[12px] text-white/25 hover:text-emerald-400 transition-colors">
+                    CM Trend <span className="text-emerald-400 font-bold">{quickAddCard.cmTrend || quickAddCard.marketPrice}€</span> → appuyer
+                  </button>
+                )}
               </div>
-              {(quickAddCard.cmTrend || quickAddCard.marketPrice) && (
-                <button type="button" onClick={() => setQuickPrice(quickAddCard.cmTrend || quickAddCard.marketPrice)}
-                  className="text-[12px] text-white/25 hover:text-emerald-400 transition-colors">
-                  CM Trend <span className="text-emerald-400 font-bold">{quickAddCard.cmTrend || quickAddCard.marketPrice}€</span> → appuyer
-                </button>
-              )}
+            )}
+
+            {/* Prix de revente visé (masqué si lot) */}
+            {!quickIsLot && (
+              <div className="space-y-1.5">
+                <label className="text-[12px] font-semibold text-white/35 uppercase tracking-wider">Prix de revente visé</label>
+                <div className="relative">
+                  <input type="number" step="0.01" min="0" placeholder="65.00"
+                    value={quickExpectedPrice} onChange={(e) => setQuickExpectedPrice(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3.5 pr-10 text-[18px] font-bold text-white placeholder-white/15 focus:outline-none focus:border-emerald-500/40 transition-all" />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[14px] text-white/25 font-bold">€</span>
+                </div>
+              </div>
+            )}
+
+            {/* Ajout en Lot */}
+            <button type="button" onClick={() => setQuickIsLot(!quickIsLot)}
+              className={`w-full rounded-2xl py-2.5 text-[13px] font-bold border transition-all ${
+                quickIsLot
+                  ? 'bg-violet-500/15 border-violet-500/40 text-violet-400'
+                  : 'border-white/8 text-white/30 hover:text-white/50'
+              }`}>
+              📦 Ajout en Lot ? {quickIsLot ? '✓ Activé' : 'Non'}
+            </button>
+
+            {quickIsLot && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold text-white/35 uppercase tracking-wider">Coût total du lot</label>
+                  <div className="relative">
+                    <input type="number" step="0.01" min="0" placeholder="120.00"
+                      value={quickLotCost} onChange={(e) => setQuickLotCost(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 pr-8 text-[15px] font-bold text-white placeholder-white/15 focus:outline-none focus:border-violet-500/40 transition-all" />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[13px] text-white/25 font-bold">€</span>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold text-white/35 uppercase tracking-wider">Nb d&apos;articles</label>
+                  <input type="number" min="1" placeholder="10"
+                    value={quickLotNb} onChange={(e) => setQuickLotNb(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-[15px] font-bold text-white placeholder-white/15 focus:outline-none focus:border-violet-500/40 transition-all" />
+                </div>
+                {quickLotCost && quickLotNb && (
+                  <p className="col-span-2 text-[11px] text-white/30 text-center">
+                    {(parseFloat(quickLotCost) / (parseInt(quickLotNb) || 1)).toFixed(2)}€ / carte
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Type */}
+            <div className="space-y-1.5">
+              <label className="text-[12px] font-semibold text-white/35 uppercase tracking-wider">Type</label>
+              <div className="grid grid-cols-2 gap-3">
+                {(['SINGLE', 'SEALED'] as const).map((c) => (
+                  <button key={c} type="button" onClick={() => setQuickCategory(c)}
+                    className={`py-2.5 rounded-2xl text-[13px] font-bold border transition-all ${
+                      quickCategory === c ? 'bg-white text-black border-white' : 'border-white/10 text-white/40 hover:border-white/25 hover:text-white/60'
+                    }`}>
+                    {c === 'SINGLE' ? '🃏 Carte unité' : '📦 Scellé / Booster'}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="space-y-2">
+            {/* Stockée chez */}
+            <div className="space-y-1.5">
               <label className="text-[12px] font-semibold text-white/35 uppercase tracking-wider">Stockée chez</label>
               <div className="grid grid-cols-2 gap-3">
                 {(['CELIAN', 'ROMAIN'] as const).map((loc) => (
                   <button key={loc} type="button" onClick={() => setQuickLocation(loc)}
-                    className={`py-4 rounded-2xl text-[14px] font-bold border transition-all ${quickLocation === loc ? 'bg-white text-black border-white' : 'border-white/10 text-white/40 hover:border-white/25 hover:text-white/60'}`}>
-                    {loc === 'CELIAN' ? 'Célian' : 'Romain'}
+                    className={`py-2.5 rounded-2xl text-[13px] font-bold border transition-all ${
+                      quickLocation === loc
+                        ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-400'
+                        : 'border-white/10 text-white/40 hover:border-white/25 hover:text-white/60'
+                    }`}>
+                    📍 {loc === 'CELIAN' ? 'Chez Célian' : 'Chez Romain'}
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Qui a acheté */}
+            <div className="space-y-1.5">
+              <label className="text-[12px] font-semibold text-white/35 uppercase tracking-wider">
+                Qui a acheté ? <span className="text-white/15">(depuis la cagnotte)</span>
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                {([
+                  { value: 'ROMAIN_PERSO' as FundedBy, label: '🛒 Romain' },
+                  { value: 'CELIAN_PERSO' as FundedBy, label: '🛒 Célian' },
+                ]).map(({ value, label }) => (
+                  <button key={value} type="button"
+                    onClick={() => setQuickFundedBy(quickFundedBy === value ? null : value)}
+                    className={`py-2.5 rounded-2xl text-[13px] font-bold border transition-all ${
+                      quickFundedBy === value
+                        ? 'bg-white/10 border-white/30 text-white'
+                        : 'border-white/10 text-white/40 hover:border-white/25 hover:text-white/60'
+                    }`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Gradée */}
+            <button type="button" onClick={() => setQuickIsGraded(!quickIsGraded)}
+              className={`w-full rounded-2xl py-2.5 text-[13px] font-bold border transition-all ${
+                quickIsGraded
+                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
+                  : 'border-white/8 text-white/30 hover:text-white/50'
+              }`}>
+              🏅 Gradée ? {quickIsGraded ? '✓ Oui' : 'Non'}
+            </button>
+            {quickIsGraded && (
+              <div className="grid grid-cols-2 gap-3">
+                <select value={quickGradingCompany} onChange={(e) => setQuickGradingCompany(e.target.value)}
+                  className="bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-[14px] text-white focus:outline-none focus:border-amber-500/40 transition-all">
+                  <option value="">Entreprise…</option>
+                  {GRADING_COMPANIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <input type="number" min="1" max="10" placeholder="Note (1-10)"
+                  value={quickGradingNote} onChange={(e) => setQuickGradingNote(e.target.value)}
+                  className="bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-[14px] text-white placeholder-white/15 focus:outline-none focus:border-amber-500/40 transition-all" />
+              </div>
+            )}
+
+            {/* Notes */}
+            <div className="space-y-1.5">
+              <label className="text-[12px] font-semibold text-white/35 uppercase tracking-wider">Notes</label>
+              <textarea placeholder="État, détails..." value={quickNotes}
+                onChange={(e) => setQuickNotes(e.target.value)} rows={2}
+                className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-[14px] text-white placeholder-white/15 focus:outline-none focus:border-white/20 transition-all resize-none" />
             </div>
           </div>
 
