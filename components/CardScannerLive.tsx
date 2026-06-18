@@ -135,6 +135,7 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
   const [quickLotNb, setQuickLotNb]   = useState('')
   const [saving, setSaving]           = useState(false)
   const [savedUids, setSavedUids]     = useState<Set<string>>(new Set())
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   // ── Camera ──────────────────────────────────────────────────────────────────
   async function applyZoom(val: number) {
@@ -364,15 +365,16 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
         {/* Top bar overlay */}
         <div className="absolute top-0 inset-x-0 z-10 flex items-center justify-between px-4 pt-3 pb-6"
           style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.6), transparent)' }}>
-          <div className="flex items-center gap-2">
+          <button type="button" onClick={() => detectedCards.length > 0 && setHistoryOpen(true)}
+            className="flex items-center gap-2">
             <ScanLine size={14} className="text-emerald-400" />
             <span className="text-[13px] font-bold text-white/80">Scanner</span>
             {detectedCards.length > 0 && (
-              <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-[9px] text-emerald-400 font-bold">
+              <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-[9px] text-emerald-400 font-bold animate-pulse">
                 {detectedCards.length}
               </span>
             )}
-          </div>
+          </button>
           <button type="button" onClick={onClose}
             className="w-9 h-9 flex items-center justify-center rounded-full bg-black/50 text-white/70 hover:text-white active:scale-95 transition-all">
             <X size={18} />
@@ -525,6 +527,64 @@ export default function CardScannerLive({ open, onClose, onQuickAdd, defaultVint
           <p className="text-center text-[12px] text-white/25 pb-3">Aucune carte pour « {query} »</p>
         )}
       </div>
+
+      {/* History panel */}
+      {historyOpen && (
+        <div className="absolute inset-0 z-20 bg-[#0e0e10] flex flex-col"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+          <div className="flex items-center justify-between px-5 h-14 border-b border-white/5 shrink-0">
+            <span className="text-[15px] font-bold text-white">Historique ({detectedCards.length})</span>
+            <button type="button" onClick={() => setHistoryOpen(false)}
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-white/6 text-white/60 hover:text-white transition-colors">
+              <X size={18} />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+            {detectedCards.length === 0 && (
+              <p className="text-center text-[13px] text-white/25 py-10">Aucune carte scannée</p>
+            )}
+            {detectedCards.map((card) => {
+              const isSaved = savedUids.has(card.uid)
+              const price = card.cmTrend || card.marketPrice
+              return (
+                <div key={card.uid}
+                  className={`flex items-center gap-3.5 px-4 py-3.5 rounded-2xl border transition-colors ${isSaved ? 'bg-emerald-500/5 border-emerald-500/15' : 'bg-white/4 border-white/6'}`}>
+                  <div className="w-12 h-[68px] rounded-xl overflow-hidden bg-zinc-900 border border-white/6 shrink-0">
+                    {card.imageUrl ? <img src={card.imageUrl} alt="" className="w-full h-full object-cover" />
+                      : <div className="w-full h-full flex items-center justify-center"><Camera size={12} className="text-white/15" /></div>}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-[15px] font-bold truncate ${isSaved ? 'text-emerald-400' : 'text-white'}`}>
+                      {card.nameFR || card.name}
+                    </p>
+                    <p className="text-[11px] text-white/35 font-mono mt-0.5">{card.setCode} · {card.number}</p>
+                    {card.rarityFR && <p className="text-[10px] text-white/20 mt-0.5">{card.rarityFR}</p>}
+                    {card.setName && <p className="text-[10px] text-white/15 truncate mt-0.5">{card.setName}</p>}
+                  </div>
+                  <div className="flex flex-col items-end gap-1.5 shrink-0">
+                    {price && <span className="text-[14px] font-bold text-emerald-400">{price}€</span>}
+                    {isSaved
+                      ? <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-semibold">
+                          <CheckCircle2 size={14} /> Ajouté
+                        </span>
+                      : <button type="button"
+                          onClick={() => { openQuickAdd(card); setHistoryOpen(false) }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500 text-black text-[11px] font-bold active:scale-95 transition-transform">
+                          <Plus size={12} /> Ajouter
+                        </button>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="shrink-0 px-5 pb-5 pt-3 border-t border-white/5">
+            <button type="button" onClick={() => setHistoryOpen(false)}
+              className="w-full py-3.5 rounded-2xl bg-white/6 text-[15px] text-white/50 font-semibold hover:text-white hover:bg-white/10 transition-colors">
+              Retour au scanner
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Quick-add fullscreen */}
       {quickAddCard && (
