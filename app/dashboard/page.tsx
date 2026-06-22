@@ -14,6 +14,7 @@ import TresorerieTab from '@/components/TresorerieTab'
 import LogistiqueTab from '@/components/LogistiqueTab'
 import StatsTab from '@/components/StatsTab'
 import CalendarTab from '@/components/CalendarTab'
+import MarketTab from '@/components/MarketTab'
 import ItemDetailModal from '@/components/ItemDetailModal'
 import AddEditModal from '@/components/AddEditModal'
 import CardScannerLive from '@/components/CardScannerLive'
@@ -22,10 +23,10 @@ import LotSellModal from '@/components/LotSellModal'
 import DeleteModal from '@/components/DeleteModal'
 import SettingsModal from '@/components/SettingsModal'
 import LogistiqueModal from '@/components/LogistiqueModal'
-import { Plus, Package, Archive, Loader2, Target, PieChart, Settings, BarChart2, Layers, PackageOpen, Truck, CalendarDays, Camera } from 'lucide-react'
+import { Plus, Package, Archive, Loader2, Target, PieChart, Settings, BarChart2, Layers, PackageOpen, Truck, CalendarDays, Camera, TrendingUp } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
-type Tab = 'stock' | 'archives' | 'stats' | 'objectifs' | 'tresorerie' | 'logistique' | 'calendrier'
+type Tab = 'stock' | 'archives' | 'marche' | 'stats' | 'objectifs' | 'tresorerie' | 'logistique' | 'calendrier'
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -274,6 +275,7 @@ export default function DashboardPage() {
               <div className="flex items-center gap-1 border-b border-zinc-800/80 mb-6 overflow-x-auto">
                 <TabButton active={activeTab === 'stock'}       onClick={() => setActiveTab('stock')}       icon={Package}  label="Stock"         count={stockCount} />
                 <TabButton active={activeTab === 'archives'}    onClick={() => setActiveTab('archives')}    icon={Archive}  label="Archives"      count={soldCount} />
+                <TabButton active={activeTab === 'marche'}      onClick={() => setActiveTab('marche')}      icon={TrendingUp} label="Marché" />
                 <TabButton active={activeTab === 'stats'}       onClick={() => setActiveTab('stats')}       icon={BarChart2} label="Statistiques" />
                 <TabButton active={activeTab === 'objectifs'}   onClick={() => setActiveTab('objectifs')}   icon={Target}   label="Objectifs" />
                 <TabButton active={activeTab === 'tresorerie'}  onClick={() => setActiveTab('tresorerie')}  icon={PieChart} label="Trésorerie" />
@@ -305,6 +307,7 @@ export default function DashboardPage() {
                   onRestoreToStock={handleRestoreToStock}
                 />
               )}
+              {activeTab === 'marche'     && <MarketTab />}
               {activeTab === 'stats'      && <StatsTab items={items} consumablesTotal={stats.consumablesTotal} stats={stats} />}
               {activeTab === 'objectifs'  && <ObjectifsTab stats={stats} settings={settings} />}
               {activeTab === 'tresorerie' && <TresorerieTab stats={stats} />}

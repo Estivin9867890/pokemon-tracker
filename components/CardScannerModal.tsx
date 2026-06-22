@@ -1,8 +1,9 @@
 'use client'
 
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { Camera, X, Loader2, Search, Zap } from 'lucide-react'
+import { Camera, X, Loader2, Search, Zap, ArrowLeft, Check } from 'lucide-react'
 import { ItemFormData } from '@/types'
+import PriceEvolution from '@/components/PriceEvolution'
 
 export type ScanData = Pick<ItemFormData, 'pokemon_name' | 'card_number' | 'extension' | 'rarity' | 'expected_sale_price'>
 
@@ -97,6 +98,7 @@ export default function CardScannerModal({ open, onClose, onResult }: CardScanne
   const [searching, setSearching]     = useState(false)
   const [results, setResults]         = useState<TCGdexCard[]>([])
   const [loadingId, setLoadingId]     = useState<string | null>(null)
+  const [previewCard, setPreviewCard] = useState<TCGdexCard | null>(null)
 
   // ── Camera ──────────────────────────────────────────────────────────────────
   async function startCamera() {
@@ -209,7 +211,7 @@ export default function CardScannerModal({ open, onClose, onResult }: CardScanne
     mountedRef.current = true
     setCameraReady(false); setCameraError('')
     setScanning(false); setScanResult(''); setScanError('')
-    setQuery(''); setResults([]); setSearching(false); setLoadingId(null)
+    setQuery(''); setResults([]); setSearching(false); setLoadingId(null); setPreviewCard(null)
     startCamera()
     return () => {
       mountedRef.current = false
@@ -321,11 +323,46 @@ export default function CardScannerModal({ open, onClose, onResult }: CardScanne
                   }
                 </div>
 
+                {/* Card Preview with prices */}
+                {previewCard && (
+                  <div className="rounded-2xl border border-white/8 bg-white/3 overflow-hidden">
+                    <div className="px-3.5 py-3 border-b border-white/5">
+                      <button type="button" onClick={() => setPreviewCard(null)}
+                        className="flex items-center gap-1.5 text-[11px] text-white/40 hover:text-white/70 transition-colors mb-2">
+                        <ArrowLeft size={11} /> Retour
+                      </button>
+                      <div className="flex items-start gap-3">
+                        <div className="w-14 h-[78px] rounded-xl overflow-hidden bg-zinc-900 border border-white/6 shrink-0">
+                          {previewCard.image
+                            ? <img src={`${previewCard.image}/low.webp`} alt={previewCard.name} className="w-full h-full object-cover" />
+                            : <div className="w-full h-full flex items-center justify-center"><Camera size={12} className="text-white/15" /></div>}
+                        </div>
+                        <div className="min-w-0 pt-0.5">
+                          <p className="text-[14px] font-bold text-white">{previewCard.name}</p>
+                          <p className="text-[10px] text-white/30 font-mono mt-0.5">{previewCard.set?.id?.toUpperCase()} · #{previewCard.localId}</p>
+                          {previewCard.set?.name && <p className="text-[10px] text-white/20 truncate mt-0.5">{previewCard.set.name}</p>}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="px-3.5 py-3">
+                      <PriceEvolution pokemonName={previewCard.name} cardNumber={previewCard.localId} />
+                    </div>
+                    <div className="px-3.5 pb-3">
+                      <button type="button" onClick={() => selectCard(previewCard)} disabled={loadingId === previewCard.id}
+                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 disabled:opacity-40 text-black font-bold text-[13px] transition-all active:scale-[0.98]">
+                        {loadingId === previewCard.id
+                          ? <><Loader2 size={13} className="animate-spin" /> Chargement…</>
+                          : <><Check size={13} /> Choisir cette carte</>}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Results */}
-                {results.length > 0 && (
+                {!previewCard && results.length > 0 && (
                   <div className="rounded-2xl border border-white/6 overflow-hidden divide-y divide-white/4 bg-white/2">
                     {results.map((card) => (
-                      <button key={card.id} type="button" onClick={() => selectCard(card)} disabled={loadingId === card.id}
+                      <button key={card.id} type="button" onClick={() => setPreviewCard(card)}
                         className="w-full flex items-center gap-3 px-3.5 py-3 hover:bg-white/5 active:bg-white/8 text-left transition-colors">
                         <div className="w-9 h-[50px] rounded-xl overflow-hidden bg-zinc-900 border border-white/6 shrink-0">
                           {card.image
@@ -337,15 +374,13 @@ export default function CardScannerModal({ open, onClose, onResult }: CardScanne
                           <p className="text-[10px] text-white/30 font-mono mt-0.5">{card.set?.id?.toUpperCase()} · {card.localId}</p>
                           {card.set?.name && <p className="text-[10px] text-white/18 truncate mt-0.5">{card.set.name}</p>}
                         </div>
-                        {loadingId === card.id
-                          ? <Loader2 size={14} className="animate-spin text-white/30 shrink-0" />
-                          : <span className="text-[10px] text-emerald-400/60 font-semibold shrink-0">Choisir →</span>}
+                        <span className="text-[10px] text-emerald-400/60 font-semibold shrink-0">Voir prix →</span>
                       </button>
                     ))}
                   </div>
                 )}
 
-                {!searching && query.trim().length >= 2 && results.length === 0 && (
+                {!previewCard && !searching && query.trim().length >= 2 && results.length === 0 && (
                   <p className="text-center text-[12px] text-white/20 py-3">
                     Aucune carte pour « {query} »
                   </p>
