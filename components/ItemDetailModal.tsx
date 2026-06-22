@@ -7,6 +7,7 @@ import {
   MapPin, Tag, Clock, Package, TrendingUp, TrendingDown,
   CalendarDays, StickyNote, Zap, Sparkles, Layers, Check,
 } from 'lucide-react'
+import PriceEvolution from '@/components/PriceEvolution'
 
 interface ItemDetailModalProps {
   open: boolean
@@ -231,6 +232,11 @@ export default function ItemDetailModal({ open, onClose, item, roiTarget, hits =
               </Row>
             )}
           </Section>
+        )}
+
+        {/* Prix du marché (cartes simples uniquement) */}
+        {item.pokemon_category === 'SINGLE' && item.pokemon_name && (
+          <PriceEvolution pokemonName={item.pokemon_name} cardNumber={item.card_number} />
         )}
 
         {/* Vente réelle (si vendu) */}
