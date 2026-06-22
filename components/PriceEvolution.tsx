@@ -37,21 +37,24 @@ function getHistory(): Record<string, Snapshot[]> {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') } catch { return {} }
 }
 
-function saveSnapshot(cardKey: string, price: number) {
-  const today = new Date().toISOString().slice(0, 10)
+function saveSnapshot(cardKey: string, price: number, date?: string) {
+  const d = date ?? new Date().toISOString().slice(0, 10)
   const all = getHistory()
   const list = all[cardKey] ?? []
-  if (list.length > 0 && list[list.length - 1].date === today) {
-    list[list.length - 1].price = price
+  const existing = list.findIndex((s) => s.date === d)
+  if (existing >= 0) {
+    list[existing].price = price
   } else {
-    list.push({ date: today, price })
+    list.push({ date: d, price })
+    list.sort((a, b) => a.date.localeCompare(b.date))
   }
   all[cardKey] = list
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(all)) } catch { /* quota */ }
 }
 
 function getSnapshots(cardKey: string): Snapshot[] {
-  return getHistory()[cardKey] ?? []
+  const list = getHistory()[cardKey] ?? []
+  return list.sort((a, b) => a.date.localeCompare(b.date))
 }
 
 function daysAgo(n: number): string {
@@ -236,21 +239,10 @@ export default function PriceEvolution({ pokemonName, cardNumber }: { pokemonNam
         setPrice(priceResult)
 
         const key = cardNumber ? `${pokemonName}__${cardNumber}` : pokemonName!
+        if (cm.avg30 != null) saveSnapshot(key, cm.avg30, daysAgo(30))
+        if (cm.avg7 != null) saveSnapshot(key, cm.avg7, daysAgo(7))
+        if (cm.avg1 != null) saveSnapshot(key, cm.avg1, daysAgo(1))
         saveSnapshot(key, current)
-        if (cm.avg30 != null) {
-          const key30 = key
-          const hist = getSnapshots(key30)
-          const d30 = daysAgo(30)
-          if (!hist.some((s) => s.date === d30)) {
-            saveSnapshot(key30, cm.avg30)
-          }
-          if (cm.avg7 != null) {
-            const d7 = daysAgo(7)
-            if (!hist.some((s) => s.date === d7)) {
-              saveSnapshot(key30, cm.avg7)
-            }
-          }
-        }
         setSnapshots(getSnapshots(key))
       } catch (err) {
         if ((err as Error).name !== 'AbortError') setError('Erreur réseau')
