@@ -70,13 +70,13 @@ async function fetchPrices(tcgdexId: string): Promise<PriceCard | null> {
 }
 
 function captureToBase64(video: HTMLVideoElement): string {
-  const TARGET_W = 800
+  const TARGET_W = 480
   const ratio = TARGET_W / video.videoWidth
   const canvas = document.createElement('canvas')
   canvas.width = TARGET_W
   canvas.height = Math.round(video.videoHeight * ratio)
   canvas.getContext('2d')!.drawImage(video, 0, 0, canvas.width, canvas.height)
-  return canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
+  return canvas.toDataURL('image/jpeg', 0.7).split(',')[1]
 }
 
 export default function CardScannerModal({ open, onClose, onResult }: CardScannerModalProps) {

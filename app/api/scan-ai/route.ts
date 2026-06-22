@@ -15,12 +15,7 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Body invalide' }, { status: 400 })
   }
 
-  const prompt = [
-    'Photo of a French Pokémon TCG card. Extract:',
-    '1. name: the Pokémon name in French (large bold text at top)',
-    '2. number: card number at bottom (e.g. "045/195")',
-    'Reply ONLY valid JSON: {"name":"...","number":"..."}',
-  ].join('\n')
+  const prompt = 'French Pokémon card. Return JSON: {"name":"<name>","number":"<number>"}'
 
   try {
     const res = await fetch(
@@ -35,7 +30,7 @@ export async function POST(req: Request) {
           ]}],
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 256,
+            maxOutputTokens: 64,
           },
         }),
       },
