@@ -134,7 +134,7 @@ export default function CardScannerModal({ open, onClose, onResult }: CardScanne
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageBase64: base64 }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(30000),
       })
       const data = await res.json() as { name?: string; number?: string; error?: string; detail?: string }
       if (!mountedRef.current) return
