@@ -1,4 +1,4 @@
-export const maxDuration = 30
+export const runtime = 'edge'
 
 export async function POST(req: Request) {
   const key = process.env.GEMINI_API_KEY
@@ -17,9 +17,9 @@ export async function POST(req: Request) {
 
   const prompt = [
     'Photo of a French Pokémon TCG card. Extract:',
-    '1. name: the Pokémon name in French (large bold text at top, e.g. "Sorboul", "Dracaufeu ex", "Pikachu", "Skitty")',
-    '2. number: card number at bottom (e.g. "045/195", "106/189")',
-    'Reply JSON: {"name":"...","number":"..."}',
+    '1. name: the Pokémon name in French (large bold text at top)',
+    '2. number: card number at bottom (e.g. "045/195")',
+    'Reply ONLY valid JSON: {"name":"...","number":"..."}',
   ].join('\n')
 
   try {
@@ -38,7 +38,6 @@ export async function POST(req: Request) {
             maxOutputTokens: 256,
           },
         }),
-        signal: AbortSignal.timeout(25000),
       },
     )
 
