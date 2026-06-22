@@ -42,39 +42,59 @@ function formatEur(v: number | null): string {
   return `${v.toFixed(2)} €`
 }
 
-function MiniChart({ points }: { points: { x: number; y: number }[] }) {
+function MiniChart({ points }: { points: { label: string; y: number }[] }) {
   if (points.length < 2) return null
   const minY = Math.min(...points.map((p) => p.y))
   const maxY = Math.max(...points.map((p) => p.y))
-  const range = maxY - minY || 1
-  const W = 280
-  const H = 80
-  const PAD = 8
+  const padY = (maxY - minY) * 0.15 || 1
+  const yLow = minY - padY
+  const yHigh = maxY + padY
+  const W = 400
+  const H = 140
+  const PADX = 30
+  const PADY = 16
+  const n = points.length
 
-  const scaled = points.map((p) => ({
-    x: PAD + ((p.x) / (points[points.length - 1].x)) * (W - PAD * 2),
-    y: PAD + (1 - (p.y - minY) / range) * (H - PAD * 2),
+  const scaled = points.map((p, i) => ({
+    x: PADX + (i / (n - 1)) * (W - PADX * 2),
+    y: PADY + (1 - (p.y - yLow) / (yHigh - yLow)) * (H - PADY * 2 - 20),
   }))
 
-  const path = scaled.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
-  const trending = points[points.length - 1].y >= points[0].y
+  const trending = points[n - 1].y >= points[0].y
   const color = trending ? '#34d399' : '#f87171'
 
+  const pathD = scaled.map((p, i) => {
+    if (i === 0) return `M${p.x},${p.y}`
+    const prev = scaled[i - 1]
+    const cx = (prev.x + p.x) / 2
+    return `C${cx},${prev.y} ${cx},${p.y} ${p.x},${p.y}`
+  }).join(' ')
+
+  const fillY = H - 20
+  const fillD = `${pathD} L${scaled[n - 1].x},${fillY} L${scaled[0].x},${fillY} Z`
+
+  const uid = `grad-${Math.random().toString(36).slice(2, 8)}`
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-20 mt-2">
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full mt-3" style={{ height: 160 }}>
       <defs>
-        <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.2" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        <linearGradient id={uid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.02" />
         </linearGradient>
       </defs>
-      <path
-        d={`${path} L${scaled[scaled.length - 1].x},${H} L${scaled[0].x},${H} Z`}
-        fill="url(#priceGrad)"
-      />
-      <path d={path} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d={fillD} fill={`url(#${uid})`} />
+      <path d={pathD} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
       {scaled.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r="3" fill={color} />
+        <g key={i}>
+          <circle cx={p.x} cy={p.y} r="5" fill="#0e0e10" stroke={color} strokeWidth="2.5" />
+          <text x={p.x} y={p.y - 12} textAnchor="middle" fill="white" fontSize="10" fontWeight="600" opacity="0.7">
+            {points[i].y.toFixed(2)} €
+          </text>
+          <text x={p.x} y={H - 4} textAnchor="middle" fill="white" fontSize="9" opacity="0.3">
+            {points[i].label}
+          </text>
+        </g>
       ))}
     </svg>
   )
@@ -184,11 +204,11 @@ export default function PriceEvolution({ pokemonName, cardNumber }: { pokemonNam
     { label: '30J', value: pct30 },
   ].filter((p) => p.value != null)
 
-  const chartPoints: { x: number; y: number }[] = []
-  if (price.avg30 != null) chartPoints.push({ x: 0, y: price.avg30 })
-  if (price.avg7 != null) chartPoints.push({ x: 23, y: price.avg7 })
-  if (price.avg1 != null) chartPoints.push({ x: 29, y: price.avg1 })
-  chartPoints.push({ x: 30, y: price.current })
+  const chartPoints: { label: string; y: number }[] = []
+  if (price.avg30 != null) chartPoints.push({ label: '-30J', y: price.avg30 })
+  if (price.avg7 != null) chartPoints.push({ label: '-7J', y: price.avg7 })
+  if (price.avg1 != null) chartPoints.push({ label: '-1J', y: price.avg1 })
+  chartPoints.push({ label: 'Auj.', y: price.current })
 
   const high = Math.max(price.current, price.avg1 ?? 0, price.avg7 ?? 0, price.avg30 ?? 0)
   const low = price.low ?? Math.min(price.current, price.avg1 ?? Infinity, price.avg7 ?? Infinity, price.avg30 ?? Infinity)
