@@ -20,31 +20,35 @@ export async function POST(req: Request) {
     'Reply JSON: {"name":"...","number":"..."}',
   ].join('\n')
 
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [
-            { text: prompt },
-            { inline_data: { mime_type: 'image/jpeg', data: imageBase64 } },
-          ]}],
-          generationConfig: {
-            temperature: 0,
-            maxOutputTokens: 100,
-            responseMimeType: 'application/json',
-          },
-        }),
-        signal: AbortSignal.timeout(10000),
-      },
-    )
+  const models = ['gemini-2.0-flash-lite', 'gemini-1.5-flash']
 
-    if (!res.ok) {
-      const err = await res.text()
-      return Response.json({ error: `Gemini ${res.status}`, detail: err.slice(0, 200) }, { status: res.status })
-    }
+  let lastError = ''
+  for (const model of models) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [
+              { text: prompt },
+              { inline_data: { mime_type: 'image/jpeg', data: imageBase64 } },
+            ]}],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 256,
+              responseMimeType: 'application/json',
+            },
+          }),
+          signal: AbortSignal.timeout(12000),
+        },
+      )
+
+      if (!res.ok) {
+        lastError = `Gemini ${res.status} (${model}): ${(await res.text()).slice(0, 200)}`
+        continue
+      }
 
     const data = await res.json() as {
       candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; finishReason?: string }[]
@@ -60,20 +64,24 @@ export async function POST(req: Request) {
       return Response.json({ error: `No response (finishReason: ${candidate?.finishReason ?? 'unknown'})` }, { status: 422 })
     }
 
-    const parts = candidate.content.parts
-    const answerPart = parts.find((p) => !p.thought) ?? parts[parts.length - 1]
-    const raw = answerPart?.text ?? ''
-    const clean = raw.replace(/```json\n?|\n?```/g, '').trim()
+      const parts = candidate.content.parts
+      const answerPart = parts.find((p) => !p.thought) ?? parts[parts.length - 1]
+      const raw = answerPart?.text ?? ''
+      const clean = raw.replace(/```json\n?|\n?```/g, '').trim()
 
-    try {
-      const parsed = JSON.parse(clean) as { name?: string; number?: string }
-      return Response.json({ name: parsed.name ?? '', number: parsed.number ?? '' })
-    } catch {
-      const nameMatch = raw.match(/"name"\s*:\s*"([^"]+)"/)
-      const numMatch = raw.match(/"number"\s*:\s*"([^"]+)"/)
-      return Response.json({ name: nameMatch?.[1] ?? '', number: numMatch?.[1] ?? '' })
+      try {
+        const parsed = JSON.parse(clean) as { name?: string; number?: string }
+        return Response.json({ name: parsed.name ?? '', number: parsed.number ?? '' })
+      } catch {
+        const nameMatch = raw.match(/"name"\s*:\s*"([^"]+)"/)
+        const numMatch = raw.match(/"number"\s*:\s*"([^"]+)"/)
+        return Response.json({ name: nameMatch?.[1] ?? '', number: numMatch?.[1] ?? '' })
+      }
+    } catch (err) {
+      lastError = `${model}: ${(err as Error).message}`
+      continue
     }
-  } catch (err) {
-    return Response.json({ error: (err as Error).message }, { status: 500 })
   }
+
+  return Response.json({ error: lastError || 'Tous les modèles ont échoué' }, { status: 502 })
 }

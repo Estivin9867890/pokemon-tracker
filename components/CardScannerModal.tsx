@@ -136,11 +136,12 @@ export default function CardScannerModal({ open, onClose, onResult }: CardScanne
         body: JSON.stringify({ imageBase64: base64 }),
         signal: AbortSignal.timeout(15000),
       })
-      const data = await res.json() as { name?: string; number?: string; error?: string }
+      const data = await res.json() as { name?: string; number?: string; error?: string; detail?: string }
       if (!mountedRef.current) return
 
       if (!res.ok || data.error) {
-        setScanError(res.status === 503 ? 'Clé Gemini non configurée — tapez le nom' : (data.error ?? 'Erreur scan IA'))
+        const detail = data.detail ? ` — ${data.detail.slice(0, 80)}` : ''
+        setScanError(res.status === 503 ? 'Clé Gemini non configurée — tapez le nom' : `${data.error ?? 'Erreur scan IA'}${detail}`)
         return
       }
       const name = (data.name ?? '').trim()
