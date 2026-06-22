@@ -20,59 +20,70 @@ export async function POST(req: Request) {
     'Reply JSON: {"name":"...","number":"..."}',
   ].join('\n')
 
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [
-            { text: prompt },
-            { inline_data: { mime_type: 'image/jpeg', data: imageBase64 } },
-          ]}],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 256,
-          },
-        }),
-        signal: AbortSignal.timeout(12000),
-      },
-    )
+  const models = ['gemini-2.5-flash-lite', 'gemini-3.5-flash']
+  let lastError = ''
 
-    if (!res.ok) {
-      const err = await res.text()
-      return Response.json({ error: `Gemini ${res.status}`, detail: err.slice(0, 300) }, { status: res.status })
-    }
-
-    const data = await res.json() as {
-      candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; finishReason?: string }[]
-      promptFeedback?: { blockReason?: string }
-    }
-
-    if (data.promptFeedback?.blockReason) {
-      return Response.json({ error: `Blocked: ${data.promptFeedback.blockReason}` }, { status: 422 })
-    }
-
-    const candidate = data.candidates?.[0]
-    if (!candidate?.content?.parts?.length) {
-      return Response.json({ error: `No response (finishReason: ${candidate?.finishReason ?? 'unknown'})` }, { status: 422 })
-    }
-
-    const parts = candidate.content.parts
-    const answerPart = parts.find((p) => !p.thought) ?? parts[parts.length - 1]
-    const raw = answerPart?.text ?? ''
-    const clean = raw.replace(/```json\n?|\n?```/g, '').trim()
-
+  for (const model of models) {
     try {
-      const parsed = JSON.parse(clean) as { name?: string; number?: string }
-      return Response.json({ name: parsed.name ?? '', number: parsed.number ?? '' })
-    } catch {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [
+              { text: prompt },
+              { inline_data: { mime_type: 'image/jpeg', data: imageBase64 } },
+            ]}],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 256,
+            },
+          }),
+          signal: AbortSignal.timeout(15000),
+        },
+      )
+
+      if (!res.ok) {
+        lastError = `Gemini ${res.status} (${model}): ${(await res.text()).slice(0, 200)}`
+        continue
+      }
+
+      const data = await res.json() as {
+        candidates?: { content?: { parts?: { text?: string; thought?: boolean; thoughtSignature?: string }[] }; finishReason?: string }[]
+        promptFeedback?: { blockReason?: string }
+      }
+
+      if (data.promptFeedback?.blockReason) {
+        lastError = `Blocked: ${data.promptFeedback.blockReason}`
+        continue
+      }
+
+      const candidate = data.candidates?.[0]
+      if (!candidate?.content?.parts?.length) {
+        lastError = `No response (${model}, finishReason: ${candidate?.finishReason ?? 'unknown'})`
+        continue
+      }
+
+      const parts = candidate.content.parts
+      const answerPart = parts.find((p) => !p.thought && !p.thoughtSignature && p.text) ?? parts.filter((p) => p.text).pop()
+      const raw = answerPart?.text ?? ''
+      const clean = raw.replace(/```json\n?|\n?```/g, '').trim()
+
+      try {
+        const parsed = JSON.parse(clean) as { name?: string; number?: string }
+        if (parsed.name) return Response.json({ name: parsed.name, number: parsed.number ?? '' })
+      } catch { /* fallthrough to regex */ }
+
       const nameMatch = raw.match(/"name"\s*:\s*"([^"]+)"/)
       const numMatch = raw.match(/"number"\s*:\s*"([^"]+)"/)
-      return Response.json({ name: nameMatch?.[1] ?? '', number: numMatch?.[1] ?? '' })
+      if (nameMatch?.[1]) return Response.json({ name: nameMatch[1], number: numMatch?.[1] ?? '' })
+
+      lastError = `Empty result from ${model}`
+    } catch (err) {
+      lastError = `${model}: ${(err as Error).message}`
     }
-  } catch (err) {
-    return Response.json({ error: (err as Error).message }, { status: 500 })
   }
+
+  return Response.json({ error: lastError || 'Scan échoué', detail: lastError }, { status: 502 })
 }
