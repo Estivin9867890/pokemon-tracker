@@ -5,8 +5,10 @@ import { InventoryItem } from '@/types'
 import { calcItem, formatCurrency, formatROI, roiColor } from '@/lib/calculations'
 import {
   MapPin, Tag, Clock, Package, TrendingUp, TrendingDown,
-  CalendarDays, StickyNote, Zap, Sparkles, Layers, Check,
+  CalendarDays, StickyNote, Zap, Sparkles, Layers, Check, Download, QrCode,
 } from 'lucide-react'
+import { QRCodeCanvas } from 'qrcode.react'
+import { useRef, useCallback } from 'react'
 import PriceEvolution from '@/components/PriceEvolution'
 
 interface ItemDetailModalProps {
@@ -50,6 +52,62 @@ const STATUS_STYLE: Record<string, string> = {
   'Sur Vinted':          'bg-teal-400/10 text-teal-400 border-teal-400/20',
   'Vendu':               'bg-emerald-400/10 text-emerald-400 border-emerald-400/20',
   'Partiellement vendu': 'bg-violet-400/10 text-violet-400 border-violet-400/20',
+}
+
+function QRSection({ item }: { item: InventoryItem }) {
+  const qrRef = useRef<HTMLDivElement>(null)
+  const url = `${typeof window !== 'undefined' ? window.location.origin : ''}/dashboard?card=${item.id}`
+
+  const handleDownload = useCallback(() => {
+    if (!qrRef.current) return
+    const canvas = qrRef.current.querySelector('canvas')
+    if (!canvas) return
+    const pad = 16
+    const labelH = 32
+    const out = document.createElement('canvas')
+    out.width = canvas.width + pad * 2
+    out.height = canvas.height + pad * 2 + labelH
+    const ctx = out.getContext('2d')!
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, out.width, out.height)
+    ctx.drawImage(canvas, pad, pad)
+    ctx.fillStyle = '#000000'
+    ctx.font = 'bold 13px sans-serif'
+    ctx.textAlign = 'center'
+    const label = item.pokemon_name ?? item.item_name
+    ctx.fillText(label, out.width / 2, canvas.height + pad + 16, out.width - 16)
+    if (item.card_number) {
+      ctx.font = '10px sans-serif'
+      ctx.fillStyle = '#666666'
+      ctx.fillText(`#${item.card_number}`, out.width / 2, canvas.height + pad + 28, out.width - 16)
+    }
+    const a = document.createElement('a')
+    const slug = (item.pokemon_name ?? item.item_name).replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30)
+    a.download = `QR_${slug}.png`
+    a.href = out.toDataURL('image/png')
+    a.click()
+  }, [item])
+
+  return (
+    <div className="mb-4">
+      <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-1">QR Code</p>
+      <div className="bg-zinc-900/60 border border-zinc-800/60 rounded-xl px-4 py-3 flex items-center gap-4">
+        <div ref={qrRef} className="bg-white p-2 rounded-lg shrink-0">
+          <QRCodeCanvas value={url} size={64} level="M" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] text-zinc-500 mb-2">Scannez pour ouvrir la fiche de cette carte.</p>
+          <button
+            onClick={handleDownload}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-[11px] font-semibold transition-colors border border-zinc-700/60"
+          >
+            <Download size={10} />
+            Télécharger
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function ItemDetailModal({ open, onClose, item, roiTarget, hits = [] }: ItemDetailModalProps) {
@@ -307,6 +365,9 @@ export default function ItemDetailModal({ open, onClose, item, roiTarget, hits =
             </div>
           </Section>
         )}
+
+        {/* QR Code */}
+        <QRSection item={item} />
 
       </div>
     </Modal>

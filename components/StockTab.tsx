@@ -3,7 +3,7 @@
 import { useState, Fragment } from 'react'
 import { InventoryItem } from '@/types'
 import { calcItem, formatCurrency, formatROI, roiColor } from '@/lib/calculations'
-import { Pencil, Trash2, ShoppingCart, StickyNote, Package, Tag, X, PackageCheck, Clock, ChevronDown, ChevronRight, Sparkles, Search, Layers, Wrench } from 'lucide-react'
+import { Pencil, Trash2, ShoppingCart, StickyNote, Package, Tag, X, PackageCheck, Clock, ChevronDown, ChevronRight, Sparkles, Search, Layers, Wrench, QrCode } from 'lucide-react'
 
 type StockFilter = 'all' | 'lots' | 'singles'
 
@@ -16,6 +16,7 @@ interface StockTabProps {
   onToggleVinted: (item: InventoryItem) => void
   onMarkReceived: (item: InventoryItem) => void
   onDetail: (item: InventoryItem) => void
+  onQRCode: (item: InventoryItem) => void
   onCleanupLots?: () => Promise<void>
 }
 
@@ -31,7 +32,7 @@ function EmptyState() {
   )
 }
 
-export default function StockTab({ items, roiTarget, onSell, onEdit, onDelete, onToggleVinted, onMarkReceived, onDetail, onCleanupLots }: StockTabProps) {
+export default function StockTab({ items, roiTarget, onSell, onEdit, onDelete, onToggleVinted, onMarkReceived, onDetail, onQRCode, onCleanupLots }: StockTabProps) {
   const [expandedLotId, setExpandedLotId]   = useState<string | null>(null)
   const [search, setSearch]                  = useState('')
   const [filter, setFilter]                  = useState<StockFilter>('all')
@@ -376,6 +377,13 @@ export default function StockTab({ items, roiTarget, onSell, onEdit, onDelete, o
                               {item.is_lot ? 'Vendre +' : 'Vendre'}
                             </button>
                           )}
+                          <button
+                            onClick={() => onQRCode(item)}
+                            title="QR Code"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-600 hover:text-amber-400 hover:bg-amber-400/10 transition-colors"
+                          >
+                            <QrCode size={12} />
+                          </button>
                           <button
                             onClick={() => onEdit(item)}
                             title="Modifier"

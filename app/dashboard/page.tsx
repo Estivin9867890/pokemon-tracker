@@ -23,7 +23,9 @@ import LotSellModal from '@/components/LotSellModal'
 import DeleteModal from '@/components/DeleteModal'
 import SettingsModal from '@/components/SettingsModal'
 import LogistiqueModal from '@/components/LogistiqueModal'
-import { Plus, Package, Archive, Loader2, Target, PieChart, Settings, BarChart2, Layers, PackageOpen, Truck, CalendarDays, Camera, TrendingUp } from 'lucide-react'
+import QRCodeModal from '@/components/QRCodeModal'
+import QRCodePrintModal from '@/components/QRCodePrintModal'
+import { Plus, Package, Archive, Loader2, Target, PieChart, Settings, BarChart2, Layers, PackageOpen, Truck, CalendarDays, Camera, TrendingUp, QrCode } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
 type Tab = 'stock' | 'archives' | 'marche' | 'stats' | 'objectifs' | 'tresorerie' | 'logistique' | 'calendrier'
@@ -53,6 +55,8 @@ export default function DashboardPage() {
   const [settingsOpen, setSettingsOpen]     = useState(false)
   const [detailItem, setDetailItem]         = useState<InventoryItem | null>(null)
   const [liveScannerOpen, setLiveScannerOpen] = useState(false)
+  const [qrItem, setQrItem]                 = useState<InventoryItem | null>(null)
+  const [qrPrintOpen, setQrPrintOpen]       = useState(false)
 
   const stats = useMemo(
     () => calcStats(items, settings.initial_capital, consumables, settings.romain_owed_pokemon, settings.celian_owed_pokemon),
@@ -73,6 +77,19 @@ export default function DashboardPage() {
       .catch((e) => setError(e.message ?? 'Erreur de connexion à la base de données'))
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    if (items.length === 0 || detailItem) return
+    const params = new URLSearchParams(window.location.search)
+    const cardId = params.get('card')
+    if (cardId) {
+      const found = items.find(i => i.id === cardId)
+      if (found) {
+        setDetailItem(found)
+        window.history.replaceState({}, '', '/dashboard')
+      }
+    }
+  }, [items, detailItem])
 
   // --- Handlers ---
   async function handleQuickAdd(data: ItemFormData) {
@@ -226,6 +243,14 @@ export default function DashboardPage() {
               <span className="hidden sm:inline">Logistique</span>
             </button>
             <button
+              onClick={() => setQrPrintOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-colors border border-zinc-700/60"
+              title="Imprimer les QR Codes"
+            >
+              <QrCode size={13} />
+              <span className="hidden sm:inline">QR Codes</span>
+            </button>
+            <button
               onClick={() => setLiveScannerOpen(true)}
               className="flex items-center gap-1.5 px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-colors border border-zinc-700/60"
               title="Scanner Live"
@@ -293,6 +318,7 @@ export default function DashboardPage() {
                   onToggleVinted={handleToggleVinted}
                   onMarkReceived={handleMarkReceived}
                   onDetail={(item) => setDetailItem(item)}
+                  onQRCode={(item) => setQrItem(item)}
                   onCleanupLots={handleCleanupLots}
                 />
               )}
@@ -383,6 +409,16 @@ export default function DashboardPage() {
         onQuickAdd={handleQuickAdd}
         defaultVintedFees={settings.default_vinted_fees}
         existingLots={items.filter(i => i.is_lot)}
+      />
+      <QRCodeModal
+        open={!!qrItem}
+        onClose={() => setQrItem(null)}
+        item={qrItem}
+      />
+      <QRCodePrintModal
+        open={qrPrintOpen}
+        onClose={() => setQrPrintOpen(false)}
+        items={items}
       />
     </div>
   )
