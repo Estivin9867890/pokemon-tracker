@@ -117,7 +117,7 @@ function QRSection({ item }: { item: InventoryItem }) {
 function buildMarketUrl(item: InventoryItem): string | null {
   const name = item.pokemon_name
   if (!name) return null
-  return `https://www.cardmarket.com/fr/Pokemon/Products/Search?searchString=${encodeURIComponent(name + (item.card_number ? ' ' + item.card_number : ''))}`
+  return `https://www.cardmarket.com/fr/Pokemon/Products/Search?searchString=${encodeURIComponent(name)}`
 }
 
 export default function ItemDetailModal({ open, onClose, item, roiTarget, hits = [], onSell, onEdit, onToggleVinted }: ItemDetailModalProps) {
