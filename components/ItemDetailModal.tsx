@@ -133,7 +133,7 @@ export default function ItemDetailModal({ open, onClose, item, roiTarget, hits =
 
   return (
     <Modal open={open} onClose={onClose} title="Détail de l'article" maxWidth="max-w-md">
-      <div className="px-6 py-5">
+      <div className="px-6 py-5 overflow-y-auto">
 
         {/* En-tête */}
         <div className="mb-4">
