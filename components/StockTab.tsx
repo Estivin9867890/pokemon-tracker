@@ -380,9 +380,10 @@ export default function StockTab({ items, roiTarget, onSell, onEdit, onDelete, o
                           <button
                             onClick={() => onQRCode(item)}
                             title="QR Code"
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-600 hover:text-amber-400 hover:bg-amber-400/10 transition-colors"
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors border bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/20"
                           >
-                            <QrCode size={12} />
+                            <QrCode size={11} />
+                            QR
                           </button>
                           <button
                             onClick={() => onEdit(item)}
