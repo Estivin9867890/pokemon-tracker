@@ -360,6 +360,9 @@ export default function DashboardPage() {
         item={detailItem}
         roiTarget={settings.roi_target}
         hits={detailItem?.is_lot ? items.filter((i) => i.is_hit && i.parent_lot_id === detailItem.lot_id) : []}
+        onSell={(item) => { setDetailItem(null); item.is_lot ? setLotSellItem(item) : setSellItem(item) }}
+        onEdit={(item) => { setDetailItem(null); openEdit(item) }}
+        onToggleVinted={handleToggleVinted}
       />
       <AddEditModal
         open={addEditOpen}

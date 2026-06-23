@@ -4,8 +4,9 @@ import Modal from '@/components/ui/Modal'
 import { InventoryItem } from '@/types'
 import { calcItem, formatCurrency, formatROI, roiColor } from '@/lib/calculations'
 import {
-  MapPin, Tag, Clock, Package, TrendingUp, TrendingDown,
-  CalendarDays, StickyNote, Zap, Sparkles, Layers, Check, Download, QrCode,
+  MapPin, Tag, Clock, TrendingUp, TrendingDown,
+  CalendarDays, StickyNote, Zap, Sparkles, Layers, Check, Download,
+  ShoppingCart, Pencil, ExternalLink,
 } from 'lucide-react'
 import { QRCodeCanvas } from 'qrcode.react'
 import { useRef, useCallback } from 'react'
@@ -17,6 +18,9 @@ interface ItemDetailModalProps {
   item: InventoryItem | null
   roiTarget: number
   hits?: InventoryItem[]
+  onSell?: (item: InventoryItem) => void
+  onEdit?: (item: InventoryItem) => void
+  onToggleVinted?: (item: InventoryItem) => void
 }
 
 function formatDate(dateStr: string | null) {
@@ -91,18 +95,18 @@ function QRSection({ item }: { item: InventoryItem }) {
   return (
     <div className="mb-4">
       <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-1">QR Code</p>
-      <div className="bg-zinc-900/60 border border-zinc-800/60 rounded-xl px-4 py-3 flex items-center gap-4">
-        <div ref={qrRef} className="bg-white p-2 rounded-lg shrink-0">
-          <QRCodeCanvas value={url} size={64} level="M" />
+      <div className="bg-zinc-900/60 border border-zinc-800/60 rounded-xl p-4 flex items-center gap-4">
+        <div ref={qrRef} className="bg-white p-2.5 rounded-lg shrink-0">
+          <QRCodeCanvas value={url} size={72} level="M" />
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-[11px] text-zinc-500 mb-2">Scannez pour ouvrir la fiche de cette carte.</p>
+        <div className="flex-1 min-w-0 space-y-2">
+          <p className="text-[11px] text-zinc-500">Scannez pour ouvrir la fiche.</p>
           <button
             onClick={handleDownload}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-[11px] font-semibold transition-colors border border-zinc-700/60"
           >
             <Download size={10} />
-            Télécharger
+            Télécharger PNG
           </button>
         </div>
       </div>
@@ -110,20 +114,29 @@ function QRSection({ item }: { item: InventoryItem }) {
   )
 }
 
-export default function ItemDetailModal({ open, onClose, item, roiTarget, hits = [] }: ItemDetailModalProps) {
+function buildMarketUrl(item: InventoryItem): string | null {
+  const name = item.pokemon_name
+  if (!name) return null
+  return `https://www.cardmarket.com/fr/Pokemon/Products/Search?searchString=${encodeURIComponent(name + (item.card_number ? ' ' + item.card_number : ''))}`
+}
+
+export default function ItemDetailModal({ open, onClose, item, roiTarget, hits = [], onSell, onEdit, onToggleVinted }: ItemDetailModalProps) {
   if (!item) return null
   const calc    = calcItem(item)
   const isSold  = item.status === 'Vendu'
+  const isWaiting = item.status === 'En Attente'
+  const onVinted = item.status === 'Sur Vinted'
   const estMargin = item.expected_sale_price != null
     ? item.expected_sale_price - calc.cost_basis
     : null
+  const marketUrl = buildMarketUrl(item)
 
   return (
     <Modal open={open} onClose={onClose} title="Détail de l'article" maxWidth="max-w-md">
       <div className="px-6 py-5">
 
         {/* En-tête */}
-        <div className="mb-5">
+        <div className="mb-4">
           <div className="flex items-start justify-between gap-3 mb-2">
             <h3 className="text-base font-bold text-white leading-snug">{item.item_name}</h3>
             <span className={`shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-full border ${STATUS_STYLE[item.status] ?? ''}`}>
@@ -165,6 +178,58 @@ export default function ItemDetailModal({ open, onClose, item, roiTarget, hits =
             )}
           </div>
         </div>
+
+        {/* Actions rapides */}
+        {!isSold && (onSell || onEdit || onToggleVinted || marketUrl) && (
+          <div className="flex items-center gap-2 flex-wrap mb-4">
+            {onEdit && (
+              <button
+                onClick={() => { onClose(); onEdit(item) }}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-colors border bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700/60"
+              >
+                <Pencil size={11} />
+                Modifier
+              </button>
+            )}
+            {onSell && !isWaiting && (
+              <button
+                onClick={() => { onClose(); onSell(item) }}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-colors border ${
+                  item.is_lot
+                    ? 'bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 border-violet-500/20'
+                    : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/20'
+                }`}
+              >
+                <ShoppingCart size={11} />
+                {item.is_lot ? 'Vendre +' : 'Vendre'}
+              </button>
+            )}
+            {onToggleVinted && !isWaiting && !item.is_lot && (
+              <button
+                onClick={() => { onToggleVinted(item); onClose() }}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-colors border ${
+                  onVinted
+                    ? 'bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400 border-zinc-700'
+                    : 'bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border-teal-500/20'
+                }`}
+              >
+                <Tag size={10} />
+                {onVinted ? 'Retirer Vinted' : 'Vinted'}
+              </button>
+            )}
+            {marketUrl && (
+              <a
+                href={marketUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-colors border bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border-sky-500/20"
+              >
+                <ExternalLink size={10} />
+                Cardmarket
+              </a>
+            )}
+          </div>
+        )}
 
         {/* Localisation */}
         <Section title="Localisation">
@@ -228,7 +293,7 @@ export default function ItemDetailModal({ open, onClose, item, roiTarget, hits =
           </Section>
         )}
 
-        {/* Hits du lot — toujours visible si des hits existent */}
+        {/* Hits du lot */}
         {item.is_lot && hits.length > 0 && (
           <div className="mb-4">
             <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-1">

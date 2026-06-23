@@ -420,12 +420,19 @@ export default function StockTab({ items, roiTarget, onSell, onEdit, onDelete, o
                                     <p className={`text-xs font-medium ${hit.is_sold ? 'text-emerald-300' : 'text-white'}`}>{hit.pokemon_name ?? hit.item_name}</p>
                                     {hit.card_number && <span className="text-[10px] text-zinc-600">#{hit.card_number}</span>}
                                   </div>
-                                  <div className="flex items-center gap-4 shrink-0">
+                                  <div className="flex items-center gap-3 shrink-0">
                                     {hit.is_sold ? (
                                       <p className="text-xs font-semibold text-emerald-400">{formatCurrency(hit.sold_price ?? 0)} <span className="text-[10px] text-emerald-600">vendu</span></p>
                                     ) : hit.expected_sale_price != null ? (
                                       <p className="text-xs font-semibold text-amber-400">{formatCurrency(hit.expected_sale_price)}</p>
                                     ) : null}
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); onQRCode(hit) }}
+                                      title="QR Code"
+                                      className="w-6 h-6 flex items-center justify-center rounded-md text-zinc-600 hover:text-amber-400 hover:bg-amber-400/10 transition-colors"
+                                    >
+                                      <QrCode size={10} />
+                                    </button>
                                     {hitsTotal > 0 && hit === itemHits[itemHits.length - 1] && (
                                       <p className={`text-[10px] font-medium ${hitsTotal >= (item.lot_total_cost ?? 0) ? 'text-emerald-400' : 'text-zinc-500'}`}>
                                         Total hits : {formatCurrency(hitsTotal)} / {formatCurrency(item.lot_total_cost ?? 0)}
